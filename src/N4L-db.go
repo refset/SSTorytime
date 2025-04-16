@@ -68,7 +68,7 @@ const (
 	ERR_NEGATIVE_WEIGHT = "Arrow relation has a negative weight, which is disallowed. Use a NOT relation if you want to signify inhibition: "
 	ERR_TOO_MANY_WEIGHTS = "More than one weight value in the arrow relation "
         ERR_STRAY_PAREN="Stray ) in an event/item - illegal character"
-	ERR_MISSING_LINE_LABEL_IN_REFERENCE="Missing a line label in reference, should be int he form $label.n"
+	ERR_MISSING_LINE_LABEL_IN_REFERENCE="Missing a line label in reference, should be in the form $label.n"
 	ERR_NON_WORD_WHITE="Non word (whitespace) character after an annotation: "
 	ERR_SHORT_WORD="Short word, probably a mistake: "
 )
