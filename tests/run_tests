@@ -12,7 +12,8 @@ RED='\033[0;31m'
 END='\033[0m' # No Color
 OUT="test_output"
 
-rm -f test_outputs/*
+mkdir -p test_output
+rm -f test_output/*
 
 #
 #  Name tests to pass pass_1.in etc - the output matters here
@@ -25,7 +26,7 @@ echo ""
 
 for f in pass_*.in; do
    echo -n testing $f
-   rm -f test_outputs/N4L*.log
+   rm -f test_output/N4L*.log
    if $PASS_PROG $f > /dev/null; then 
        echo -e "${GREEN} ok ${END}"
    else 
@@ -35,7 +36,7 @@ done
 
 
 for f in fail_*.in; do
-   rm -f test_outputs/N4L*.log
+   rm -f test_output/N4L*.log
    echo -n testing $f
 
    if $FAIL_PROG $f > test_output/$f.out; 
@@ -55,7 +56,7 @@ FAIL_PROG="../src/N4L-db"
 
 for f in pass_*.in; do
    echo -n testing $f
-   rm -f test_outputs/N4L*.log
+   rm -f test_output/N4L*.log
    if $PASS_PROG $f > /dev/null; then 
        echo -e "${GREEN} ok ${END}"
    else 
@@ -65,7 +66,7 @@ done
 
 
 for f in fail_*.in; do
-   rm -f test_outputs/N4L*.log
+   rm -f test_output/N4L*.log
    echo -n testing $f
 
    if $FAIL_PROG $f > test_output/$f.out; 
