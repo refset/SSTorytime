@@ -1,0 +1,105 @@
+#!/bin/bash
+# elisp-dev-client - Client for elisp-dev-server
+# Usage: elisp-dev-client <command> [args...]
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVER_PORT=9999
+SERVER_HOST="localhost"
+
+# Function to send JSON-RPC request to server
+send_request() {
+    local command="$1"
+    local arg="$2"
+
+    local json_request
+    if [ -n "$arg" ]; then
+        json_request=$(jq -n --arg cmd "$command" --arg a "$arg" \
+            '{command: $cmd, args: [$a]}')
+    else
+        json_request=$(jq -n --arg cmd "$command" '{command: $cmd, args: []}')
+    fi
+
+    # Try to connect to server
+    if ! echo "$json_request" | socat - TCP:"$SERVER_HOST":"$SERVER_PORT" 2>/dev/null; then
+        echo '{"error": "Server not running. Start with: elisp-dev-server start"}' >&2
+        return 1
+    fi
+}
+
+COMMAND="$1"
+shift || true
+
+case "$COMMAND" in
+    df|describe-function)
+        send_request "describe-function" "$1"
+        ;;
+
+    gf|source|get-function-definition)
+        send_request "get-function-definition" "$1"
+        ;;
+
+    dv|describe-variable)
+        send_request "describe-variable" "$1"
+        ;;
+
+    info|info-lookup)
+        send_request "info-lookup" "$1"
+        ;;
+
+    read|read-file)
+        send_request "read-file" "$1"
+        ;;
+
+    eval)
+        send_request "eval" "$1"
+        ;;
+
+    list-buffers|lb)
+        send_request "list-buffers" ""
+        ;;
+
+    get-buffer|gb)
+        send_request "get-buffer" "$1"
+        ;;
+
+    ping)
+        send_request "ping" ""
+        ;;
+
+    help|--help|-h)
+        cat <<EOF
+elisp-dev-client - Client for elisp-dev-server
+
+Usage: elisp-dev-client <command> [args...]
+
+Commands:
+  df, describe-function <name>     Get function documentation
+  gf, source <name>                Get function source code
+  dv, describe-variable <name>     Get variable information
+  info, info-lookup <name>         Look up symbol in Info docs
+  read, read-file <path>           Read Elisp source file
+  eval <expr>                      Evaluate Elisp expression
+  lb, list-buffers                 List all buffers
+  gb, get-buffer <name>            Get buffer content
+  ping                             Check if server is running
+
+Server Management (see elisp-dev-server):
+  Start: elisp-dev-server start
+  Stop:  elisp-dev-server stop
+
+Examples:
+  elisp-dev-client df car
+  elisp-dev-client source mapcar | jq -r .source
+  elisp-dev-client ping
+
+Note: The server must be running. Start it with 'elisp-dev-server start'.
+EOF
+        ;;
+
+    *)
+        echo "{\"error\": \"Unknown command: $COMMAND. Use 'elisp-dev-client help' for usage.\"}" >&2
+        exit 1
+        ;;
+esac

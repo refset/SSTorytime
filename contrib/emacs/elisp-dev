@@ -1,0 +1,67 @@
+#!/bin/bash
+# elisp-dev - Batch-mode interface to elisp-dev-tools
+# Usage: elisp-dev <command> [args...]
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLS_FILE="$SCRIPT_DIR/elisp-dev-tools.el"
+
+if [ ! -f "$TOOLS_FILE" ]; then
+    echo '{"error": "elisp-dev-tools.el not found"}' >&2
+    exit 1
+fi
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+    describe-function|df)
+        emacs --batch -l "$TOOLS_FILE" --eval "(elisp-dev-describe-function \"$1\")"
+        ;;
+
+    get-function-definition|gf|source)
+        emacs --batch -l "$TOOLS_FILE" --eval "(elisp-dev-get-function-definition \"$1\")"
+        ;;
+
+    describe-variable|dv)
+        emacs --batch -l "$TOOLS_FILE" --eval "(elisp-dev-describe-variable \"$1\")"
+        ;;
+
+    info-lookup|info)
+        emacs --batch -l "$TOOLS_FILE" --eval "(elisp-dev-info-lookup-symbol \"$1\")"
+        ;;
+
+    read-file|read)
+        emacs --batch -l "$TOOLS_FILE" --eval "(elisp-dev-read-source-file \"$1\")"
+        ;;
+
+    help|--help|-h)
+        cat <<EOF
+elisp-dev - Elisp development tools for Claude Code
+
+Usage: elisp-dev <command> [args...]
+
+Commands:
+  describe-function, df <name>     Get function documentation
+  get-function-definition, gf <name>  Get function source code
+  describe-variable, dv <name>     Get variable information
+  info-lookup, info <name>         Look up symbol in Info docs
+  read-file, read <path>           Read Elisp source file
+
+Examples:
+  elisp-dev df car
+  elisp-dev source magit-section-type
+  elisp-dev dv load-path
+  elisp-dev info defun
+  elisp-dev read /usr/share/emacs/29.1/lisp/files.el
+
+Output is JSON for programmatic use.
+EOF
+        ;;
+
+    *)
+        echo "{\"error\": \"Unknown command: $COMMAND. Use 'elisp-dev help' for usage.\"}" >&2
+        exit 1
+        ;;
+esac
