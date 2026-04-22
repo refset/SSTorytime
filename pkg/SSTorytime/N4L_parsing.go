@@ -9,7 +9,6 @@ package SSTorytime
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	_ "github.com/lib/pq"
 
@@ -213,7 +212,7 @@ func UpdateSeqStatus(sst *PoSST,class int,cptr ClassedNodePtr,seq bool) Node {
 	}
 
 	fmt.Println("Non existent node class (shouldn't happen)")
-	os.Exit(-1)
+	panic("SSTorytime: fatal error")
 	var dummy Node
 	return dummy
 }

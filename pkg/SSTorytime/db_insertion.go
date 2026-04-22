@@ -8,7 +8,6 @@ package SSTorytime
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	_ "github.com/lib/pq"
 
@@ -105,17 +104,17 @@ func IdempDBAddLink(sst *PoSST,from Node,link Link,to Node) {
 
 	if frptr == toptr {
 		fmt.Println("Self-loops are not allowed",from.S,from,link,to)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if link.Arr < 0 || len(sst.ARROW_DIRECTORY) == 0 {
 		fmt.Println("No arrows have yet been defined, so you can't rely on the arrow names")
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if link.Wgt == 0 {
 		fmt.Println("Attempt to register a link with zero weight is pointless")
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	sttype := STIndexToSTType(sst.ARROW_DIRECTORY[link.Arr].STAindex)
@@ -157,7 +156,7 @@ func AppendDBLinkToNodeCommand(sst *PoSST, n1ptr NodePtr, lnk Link, sttype int) 
 
 	if sttype < -EXPRESS || sttype > EXPRESS {
 		fmt.Println(ERR_ST_OUT_OF_BOUNDS,sttype)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if n1ptr == lnk.Dst {
@@ -192,7 +191,7 @@ func AppendDBLinkArrayToNode(sst *PoSST, nptr NodePtr, array string, sttype int)
 
 	if sttype < -EXPRESS || sttype > EXPRESS {
 		fmt.Println(ERR_ST_OUT_OF_BOUNDS,sttype)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	link_table := STTypeDBChannel(sttype)

@@ -8,7 +8,6 @@ package SSTorytime
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"strconv"
 	"sort"
@@ -363,7 +362,7 @@ func GetDBNodeByNodePtr(sst *PoSST,db_nptr NodePtr) Node {
 
 		if count > 1 {
 			fmt.Println("GetDBNodeByNodePtr returned too many matches (multi-model conflict?):",count,"for ptr",db_nptr)
-			os.Exit(-1)
+			panic("SSTorytime: fatal error")
 		}
 
 		// Expand any dynamic inbuilt functions
@@ -1141,7 +1140,7 @@ func GetEntireNCConePathsAsLinks(sst *PoSST,orientation string,start []NodePtr,d
 
 	if err != nil {
 		fmt.Println("QUERY to AllNCPathsAsLinks Failed",err,qstr)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	var whole string
@@ -1185,7 +1184,7 @@ func GetConstraintConePathsAsLinks(sst *PoSST,start []NodePtr,depth int,chapter 
 
 	if err != nil {
 		fmt.Println("QUERY to ConstraintPathsAsLinks Failed",err,qstr)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	var whole string

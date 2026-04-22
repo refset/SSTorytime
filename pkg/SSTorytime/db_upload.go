@@ -8,7 +8,6 @@ package SSTorytime
 
 import (
         "fmt"
-        "os"
 	"strings"
 	_ "github.com/lib/pq"
 
@@ -76,11 +75,11 @@ func GraphToDB(sst PoSST,wait_counter bool) {
 
 	if !CreateTable(sst,ARROW_INVERSES_TABLE) {
 		fmt.Println("Unable to create table as, ",ARROW_INVERSES_TABLE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 	if !CreateTable(sst,ARROW_DIRECTORY_TABLE) {
 		fmt.Println("Unable to create table as, ",ARROW_DIRECTORY_TABLE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	for arrow := range sst.ARROW_DIRECTORY {

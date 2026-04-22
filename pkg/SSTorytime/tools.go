@@ -8,7 +8,6 @@ package SSTorytime
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sort"
 	"regexp"
@@ -543,7 +542,7 @@ func DiracNotation(s string) (bool,string,string,string) {
 			begin = params[2]			
 		default:
 			fmt.Println("Bad Dirac notation, should be <a|b> or <a|context|b>")
-			os.Exit(-1)
+			panic("SSTorytime: fatal error")
 		}
 	} else {
 		return false,"","",""

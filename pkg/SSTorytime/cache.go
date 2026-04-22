@@ -8,7 +8,6 @@ package SSTorytime
 
 import (
 	"fmt"
-	"os"
 	"sync"
 	_ "github.com/lib/pq"
 
@@ -124,7 +123,7 @@ func DownloadArrowsFromDB(sst *PoSST) {
 
 			if ad.Ptr != sst.ARROW_DIRECTORY_TOP {
 				fmt.Println(ERR_MEMORY_DB_ARROW_MISMATCH,ad,ad.Ptr,sst.ARROW_DIRECTORY_TOP)
-				os.Exit(-1)
+				panic("SSTorytime: fatal error")
 			}
 
 			sst.ARROW_DIRECTORY_TOP++
@@ -189,7 +188,7 @@ func DownloadContextsFromDB(sst *PoSST) {
 
 			if c.Ptr != sst.CONTEXT_TOP {
 				fmt.Println(ERR_MEMORY_DB_CONTEXT_MISMATCH,c,sst.CONTEXT_TOP)
-				os.Exit(-1)
+				panic("SSTorytime: fatal error")
 			}
 
 			sst.CONTEXT_DIRECTORY = append(sst.CONTEXT_DIRECTORY,c)

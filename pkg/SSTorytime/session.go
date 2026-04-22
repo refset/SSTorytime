@@ -48,7 +48,7 @@ func Open(load_arrows bool) PoSST {
 
 	if err != nil {
 		fmt.Println("Error connecting to the database: ", err)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	// Basic test
@@ -57,7 +57,7 @@ func Open(load_arrows bool) PoSST {
 	
 	if err != nil {
 		fmt.Println("Error pinging the database: ", err)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	MemoryInit(&sst)
@@ -85,7 +85,7 @@ func OverrideCredentials(u,p,d string) (string,string,string) {
 
 	if err != nil && len(dirname) > 1 {
 		fmt.Println("Unable to determine user's home directory")
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	filename := dirname+"/"+CREDENTIALS_FILE
@@ -256,49 +256,49 @@ func Configure(sst PoSST,load_arrows bool) {
 
 	if !CreateType(sst,NODEPTR_TYPE) {
 		fmt.Println("Unable to create type as, ",NODEPTR_TYPE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if !CreateType(sst,LINK_TYPE) {
 		fmt.Println("Unable to create type as, ",LINK_TYPE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if !CreateType(sst,APPOINTMENT_TYPE) {
 		fmt.Println("Unable to create type as, ",APPOINTMENT_TYPE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if !CreateTable(sst,CONTEXT_DIRECTORY_TABLE) {
 		fmt.Println("Unable to create table as, ",CONTEXT_DIRECTORY_TABLE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	DefineStoredFunctions(sst)
 
 	if !CreateTable(sst,PAGEMAP_TABLE) {
 		fmt.Println("Unable to create table as, ",PAGEMAP_TABLE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if !CreateTable(sst,NODE_TABLE) {
 		fmt.Println("Unable to create table as, ",NODE_TABLE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if !CreateTable(sst,ARROW_INVERSES_TABLE) {
 		fmt.Println("Unable to create table as, ",ARROW_INVERSES_TABLE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if !CreateTable(sst,ARROW_DIRECTORY_TABLE) {
 		fmt.Println("Unable to create table as, ",ARROW_DIRECTORY_TABLE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if !CreateTable(sst,LASTSEEN_TABLE) {
 		fmt.Println("Unable to create table as, ",LASTSEEN_TABLE)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	// Find ignorable arrows

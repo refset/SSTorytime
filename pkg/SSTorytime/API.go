@@ -8,7 +8,6 @@ package SSTorytime
 
 import (
 	"fmt"
-	"os"
 	_ "github.com/lib/pq"
 
 )
@@ -53,7 +52,7 @@ func HubJoin(sst *PoSST,name,chap string,nptrs []NodePtr,arrow string,context []
 
 	if nptrs == nil {
 		fmt.Println("Call to HubJoin with a null list of pointers")
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	if weight == nil {
@@ -64,7 +63,7 @@ func HubJoin(sst *PoSST,name,chap string,nptrs []NodePtr,arrow string,context []
 
 	if len(nptrs) != len(weight) {
 		fmt.Println("Call to HubJoin with inconsistent node/weight pointer arrays: dimensions ",len(nptrs),"vs",len(weight))
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	var chaps = make(map[string]int)

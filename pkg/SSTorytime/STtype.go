@@ -9,7 +9,6 @@ package SSTorytime
 
 import (
 	"fmt"
-	"os"
 	_ "github.com/lib/pq"
 
 )
@@ -102,7 +101,7 @@ func STTypeDBChannel(sttype int) string {
 		link_channel = I_MEXPR
 	default:
 		fmt.Println(ERR_ILLEGAL_LINK_CLASS,sttype)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	return link_channel

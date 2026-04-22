@@ -8,7 +8,6 @@ package SSTorytime
 
 import (
 	"fmt"
-	"os"
 	"io/ioutil"
 	"strings"
 	"sort"
@@ -30,7 +29,7 @@ func ReadTextFile(filename string) string {
 
 	if err != nil {
 		fmt.Println("Couldn't find or open",filename)
-		os.Exit(-1)
+		panic("SSTorytime: fatal error")
 	}
 
 	// Start by stripping HTML / XML tags before para-split
