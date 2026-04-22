@@ -15,6 +15,7 @@ import { initAuth, signIn, signOut, isSignedIn, onAuthChange } from "./auth.js";
 import * as drive from "./drive.js";
 import * as assets from "./assets.js";
 import { reindex, setKeepOffline } from "./reindex.js";
+import { parseN4L } from "./bridge.js";
 
 const FOLDER_KEY = "sstaas-drive-folder-id";
 
@@ -27,6 +28,8 @@ const CONTROLS_HTML = `
     <button id="sstaas-pick-folder" class="sstaas-btn" hidden>Choose Drive folder</button>
     <code id="sstaas-folder" class="sstaas-folder" hidden></code>
     <button id="sstaas-reindex" class="sstaas-btn primary" hidden>Re-index</button>
+    <label for="sstaas-open-local" class="sstaas-btn" title="Open a local .n4l file (test path; does not touch Drive)">Open local .n4l</label>
+    <input id="sstaas-open-local" type="file" accept=".n4l,text/plain" multiple hidden>
     <span id="sstaas-status" class="sstaas-status"></span>
   </div>`;
 
@@ -199,6 +202,12 @@ export async function injectUI({ isBridgeReady } = {}) {
     refresh();
   });
   document.getElementById("sstaas-reindex").addEventListener("click", () => runReindex());
+  document.getElementById("sstaas-open-local").addEventListener("change", (e) => {
+    const input = e.target;
+    const files = Array.from(input.files ?? []);
+    input.value = "";
+    if (files.length) runOpenLocal(files);
+  });
 
   onAuthChange(refresh);
   refresh();
@@ -230,6 +239,23 @@ function show(id, on) {
 function setStatus(t) {
   const el = document.getElementById("sstaas-status");
   if (el) el.textContent = t;
+}
+
+async function runOpenLocal(files) {
+  if (!isBridgeReadyRef()) { alert("PGlite/WASM still loading."); return; }
+  setStatus(`Reading ${files.length} local file(s)…`);
+  const payload = {};
+  try {
+    for (const f of files) payload[f.name] = await f.text();
+    const out = await parseN4L(payload);
+    const summary = out && out.files
+      ? Object.entries(out.files).map(([n, size]) => `${n}=${size}B`).join(", ")
+      : JSON.stringify(out);
+    setStatus(`Parsed: ${summary}${out.note ? ` — ${out.note}` : ""}`);
+  } catch (err) {
+    console.error("open-local failed", err);
+    setStatus("Open local failed: " + err.message);
+  }
 }
 
 async function runReindex() {
