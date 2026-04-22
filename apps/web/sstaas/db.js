@@ -101,12 +101,52 @@ export function getDB() {
 // `types` is the array of Postgres OIDs from PGlite's field metadata
 // — the Go-side pglite-js driver uses these to map values to the
 // right driver.Value type (int64 vs float64 etc.).
+//
+// PGlite has two entry points with different capabilities:
+//   - db.query(sql, params): single statement, supports parameters
+//     (goes through a prepared-statement path, which hard-errors on
+//     multi-statement input with "cannot insert multiple commands
+//     into a prepared statement")
+//   - db.exec(sql): multiple semicolon-separated statements, no params
+// Upstream's GraphToDB emits BEGIN;...COMMIT; batches, so we sniff
+// multi-statement input and route those through exec().
 export async function query(sql, params = []) {
   const db = getDB();
+
+  if (looksMultiStatement(sql)) {
+    if (params && params.length) {
+      throw new Error("pglite-js: multi-statement SQL with parameters is not supported");
+    }
+    const results = await db.exec(sql);
+    let affected = 0;
+    for (const r of results ?? []) affected += r.affectedRows ?? 0;
+    return { columns: [], types: [], rows: [], affectedRows: affected };
+  }
+
   const r = await db.query(sql, params);
   const fields = r.fields ?? [];
   const columns = fields.map((f) => f.name);
   const types = fields.map((f) => f.dataTypeID ?? 0);
   const rows = (r.rows ?? []).map((row) => columns.map((c) => row[c]));
   return { columns, types, rows, affectedRows: r.affectedRows ?? 0 };
+}
+
+// Returns true if sql has a `;` that isn't at the final trimmed
+// position, respecting single-quoted strings (SQL uses '' to escape an
+// embedded single quote). Conservative by design: if in doubt, we'd
+// rather take the exec() path than fail on a batch.
+function looksMultiStatement(sql) {
+  const trimmed = sql.trim();
+  const last = trimmed.length - 1;
+  let inStr = false;
+  for (let i = 0; i < trimmed.length; i++) {
+    const c = trimmed[i];
+    if (c === "'") {
+      if (inStr && trimmed[i + 1] === "'") { i++; continue; }
+      inStr = !inStr;
+      continue;
+    }
+    if (c === ";" && !inStr && i < last) return true;
+  }
+  return false;
 }

@@ -259,15 +259,16 @@ func UploadPageMapEvent(sst PoSST, line PageMap) {
 	qstr += "COMMIT;"
 
 	row,err := sst.DB.Query(qstr)
-	
+
 	if err != nil {
 		s := fmt.Sprint("Failed to insert pagemap event",err)
-		
+
 		if strings.Contains(s,"duplicate key") {
 		} else {
 			fmt.Println(s,"FAILED \n",qstr,err)
 		}
-		row.Close()
+		// row is nil on error — no Close() call here (prior code
+		// deref'd nil and crashed the runtime under PGlite).
 		return
 	}
 
