@@ -68,6 +68,14 @@ export async function parseN4L(filesObj) {
   return typeof out === "string" ? JSON.parse(out) : out;
 }
 
+// wasmSearch returns the upstream Response envelope verbatim — fetch-shim
+// feeds it back to main.js as the JSON response to POST /searchN4L.
+// Caller is responsible for parsing.
+export async function wasmSearch(query) {
+  if (!window.__sstWasm) throw new Error("WASM not initialized");
+  return window.__sstWasm.search(query);
+}
+
 export function wasmVersion() {
   return window.__sstWasm?.version() ?? "(not loaded)";
 }

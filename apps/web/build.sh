@@ -38,18 +38,50 @@ rm -f "$DIST/sstaas/config.local.example.js"
 rm -f "$DIST/sstaas/config.local.js"
 
 echo "Patching index.html (inject bootstrap script tag)…"
-# Take upstream's index.html and inject one extra <script> tag in
-# <head> that loads our bootstrap module BEFORE main.js executes.
-# main.js itself is already loaded as `type="module" defer` so its
-# execution is deferred until after parsing finishes — by which time
-# our bootstrap (also a module, also deferred) will have installed the
-# fetch shim.
+# Take upstream's index.html and inject:
+#  - an inline synchronous pre-shim that catches any fetch() to our
+#    handler paths before the bootstrap module finishes loading, and
+#    parks the call on a Promise until the full module-level shim
+#    replaces it. Without this, upstream main.js's DOMContentLoaded
+#    handler can race the module-graph evaluation of bootstrap.js and
+#    reach origFetch first (we hit this in practice — GET /searchN4L
+#    returned 404 from python's http.server because the shim wasn't
+#    yet installed).
+#  - the GIS loader (async, for Drive auth).
+#  - the bootstrap module, which installs the full shim and replaces
+#    the parked-Promise behavior with real handlers.
 python3 - "$PUBLIC/index.html" "$DIST/index.html" <<'PY'
 import sys, re
 src, dst = sys.argv[1], sys.argv[2]
 html = open(src).read()
-# Inject the GIS loader + sstaas bootstrap immediately before </head>.
 inject = """    <!-- sstaas client-side-drive additions -->
+    <script>
+      // Early fetch pre-shim. Any call to one of our handler paths is
+      // queued until window.__sstaasFlushFetchQueue() fires (from
+      // fetch-shim.js once the real shim is in place).
+      (function () {
+        var PATHS = { "/searchN4L": 1, "/SearchAssets": 1, "/Upload": 1 };
+        var origFetch = window.fetch.bind(window);
+        var queue = [];
+        window.__sstaasOrigFetch = origFetch;
+        window.__sstaasReal = null; // set by fetch-shim.js
+        window.fetch = function (input, init) {
+          var url = typeof input === "string" ? input : (input && input.url) || "";
+          var path = url.replace(/^https?:\\/\\/[^/]+/, "");
+          if (!PATHS[path]) return origFetch(input, init);
+          if (window.__sstaasReal) return window.__sstaasReal(input, init);
+          return new Promise(function (resolve, reject) {
+            queue.push({ input: input, init: init, resolve: resolve, reject: reject });
+          });
+        };
+        window.__sstaasFlushFetchQueue = function () {
+          while (queue.length) {
+            var q = queue.shift();
+            window.fetch(q.input, q.init).then(q.resolve, q.reject);
+          }
+        };
+      })();
+    </script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script type="module" defer src="/sstaas/bootstrap.js"></script>
   </head>"""

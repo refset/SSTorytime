@@ -10,6 +10,7 @@
 // All other URLs pass through to the real fetch.
 
 import { query as dbQuery, getDB } from "./db.js";
+import { wasmSearch } from "./bridge.js";
 
 const HANDLERS = {
   "/searchN4L":    handleSearchN4L,
@@ -18,8 +19,12 @@ const HANDLERS = {
 };
 
 export function installFetchShim() {
-  const origFetch = window.fetch.bind(window);
-  window.fetch = async (input, init) => {
+  // The inline pre-shim in index.html already captured the original
+  // fetch and queued any intercepted calls. Grab its reference so our
+  // passthrough doesn't loop forever.
+  const origFetch = window.__sstaasOrigFetch ?? window.fetch.bind(window);
+
+  const real = async (input, init) => {
     const url = (typeof input === "string" ? input : input?.url) ?? "";
     const path = url.replace(/^https?:\/\/[^/]+/, "");
     const handler = HANDLERS[path];
@@ -39,6 +44,11 @@ export function installFetchShim() {
       });
     }
   };
+
+  // Tell the pre-shim to use `real` for any further matching calls,
+  // and drain anything queued while we were loading.
+  window.__sstaasReal = real;
+  window.__sstaasFlushFetchQueue?.();
 }
 
 async function readBody(init) {
@@ -54,58 +64,18 @@ async function readBody(init) {
   return {};
 }
 
-// ---- /searchN4L (MVP placeholder) ----
+// ---- /searchN4L ----
 //
-// Upstream's response shape, abbreviated:
-//   { Response: "Orbits"|"PageMap"|... , Content: <JSON-encoded payload string>,
-//     Time: <iso>, Intent: {...}, Ambient: {...} }
-//
-// This stub honours name/text searches against the flat n4l_files
-// table only. Anything fancy returns an explanatory error so the UI
-// shows something meaningful rather than spinning forever.
+// Delegates to the WASM side, which drives the same HandleOrbit code
+// path upstream's native server uses: DecodeSearchField → SolveNodePtrs
+// → GetNodeOrbit → JSONNodeEvent → PackageResponse. Upstream's UI in
+// main.js treats the response as the raw envelope it used to get from
+// the Go server, so we return that envelope verbatim.
 async function handleSearchN4L(body) {
   const name = (body.name ?? body.query ?? "").trim();
   if (!name) return packageResponse("Error", JSON.stringify("(empty query)"));
-
-  // Backslash commands (\stats, \toc, \theme, etc.) are upstream
-  // server-side dispatches. Honour just the harmless ones; everything
-  // else returns a "not yet ported" notice.
-  if (name.startsWith("\\")) {
-    return packageResponse("Error", JSON.stringify(
-      `Backslash command "${name}" not yet implemented in client-side fork.`
-    ));
-  }
-
-  const like = "%" + name.replace(/%/g, "").replace(/_/g, "\\_") + "%";
-  const { rows } = await dbQuery(
-    `SELECT s, chap FROM nodes
-     WHERE s_lower LIKE lower($1)
-     ORDER BY length(s) ASC
-     LIMIT 25`,
-    [like]
-  );
-  if (rows.length === 0) {
-    // Fall back to listing indexed files so the user sees that
-    // re-index actually did something even before parsing is wired.
-    const fileRows = await dbQuery(
-      `SELECT name, length(text) AS bytes
-       FROM n4l_files WHERE name ILIKE $1
-       ORDER BY name LIMIT 25`,
-      [like]
-    );
-    return packageResponse("Error", JSON.stringify(
-      `No nodes match "${name}". (Parser stub: nodes/arrows/links not yet populated.\n` +
-      `Indexed files matching: ${fileRows.rows.map((r) => r[0]).join(", ") || "none"})`
-    ));
-  }
-
-  // Synthesize a minimal Orbits-shaped payload so upstream's renderer
-  // doesn't crash. Real shape will land when parsing is ported.
-  const orbits = rows.map(([s, chap]) => ({
-    Text: s, Chap: chap ?? "", NPtr: { Class: 0, CPtr: 0 }, XYZ: { X: 0, Y: 0, Z: 0 },
-    Orbits: [],
-  }));
-  return packageResponse("Orbits", JSON.stringify(orbits));
+  const raw = await wasmSearch(name);
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
 }
 
 async function handleSearchAssets(body) {
