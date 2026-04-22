@@ -84,13 +84,19 @@ export function getDB() {
 }
 
 // Promise-returning query helper used both by JS handlers and by the
-// Go WASM async bridge. Returns { columns, rows } where rows is an
-// array of arrays (positional, not named) — the simplest shape for a
-// language bridge.
+// Go WASM async bridge. Returns { columns, types, rows, affectedRows }
+// where rows is an array of arrays (positional, not named) — the
+// simplest shape to send through a language bridge.
+//
+// `types` is the array of Postgres OIDs from PGlite's field metadata
+// — the Go-side pglite-js driver uses these to map values to the
+// right driver.Value type (int64 vs float64 etc.).
 export async function query(sql, params = []) {
   const db = getDB();
   const r = await db.query(sql, params);
-  const columns = (r.fields ?? []).map((f) => f.name);
+  const fields = r.fields ?? [];
+  const columns = fields.map((f) => f.name);
+  const types = fields.map((f) => f.dataTypeID ?? 0);
   const rows = (r.rows ?? []).map((row) => columns.map((c) => row[c]));
-  return { columns, rows };
+  return { columns, types, rows, affectedRows: r.affectedRows ?? 0 };
 }

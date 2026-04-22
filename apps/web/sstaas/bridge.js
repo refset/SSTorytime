@@ -14,17 +14,18 @@ let wasmStarted = false;
 export async function initWasm() {
   if (wasmStarted) return;
 
-  // Allow Go to call PGlite via this global. Returns a Promise.
-  // (The current parser stub doesn't use this yet; the hook is in
-  // place for when N4L parsing actually runs in Go.)
+  // Allow Go (via the pglite-js sql.Driver) to call PGlite. Returns a
+  // Promise that resolves to { columns, types, rows, affectedRows }
+  // on success, or rejects with an Error on SQL failure. Rejection is
+  // important: Go's bridge distinguishes resolve vs. reject and turns
+  // the latter into an `error` return from Query/Exec.
   window.__sstQuery = async (sql, paramsJSON) => {
     let params = [];
-    if (paramsJSON && paramsJSON !== "[]") {
+    if (paramsJSON && paramsJSON !== "[]" && paramsJSON !== "null") {
       try { params = JSON.parse(paramsJSON); }
-      catch (e) { throw new Error("__sstQuery: bad params JSON"); }
+      catch { throw new Error("__sstQuery: bad params JSON"); }
     }
-    try { return await dbQuery(sql, params); }
-    catch (e) { return { error: String(e?.message ?? e) }; }
+    return await dbQuery(sql, params);
   };
 
   // Load the Go runtime and the WASM module.
