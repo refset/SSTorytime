@@ -405,23 +405,30 @@ async function parseFromHandle() {
 // Shared path: takes either an FSAA scan result or a webkitdirectory
 // File[] (wrapped as {name, path, file}) and runs parseN4L over it.
 async function parseScanResult(files) {
-  if (files.length === 0) {
+  const n4lFiles = files.filter((f) => (f.kind ?? "n4l") === "n4l");
+  const cfgFiles = files.filter((f) => f.kind === "config");
+  if (n4lFiles.length === 0) {
     setStatus("No .n4l files found in the picked directory.");
     setDot("red", "No .n4l files");
     return;
   }
-  setStatus(`Reading ${files.length} .n4l file(s)…`);
+  const cfgSuffix = cfgFiles.length
+    ? ` (plus ${cfgFiles.length} SSTconfig file(s))`
+    : "";
+  setStatus(`Reading ${n4lFiles.length} .n4l file(s)${cfgSuffix}…`);
   const payload = {};
-  for (const f of files) payload[f.path] = await f.file.text();
-  setStatus(`Parsing ${files.length} file(s) — this takes a few seconds per file…`);
-  const out = await parseN4L(payload);
+  for (const f of n4lFiles) payload[f.path] = await f.file.text();
+  const configs = {};
+  for (const f of cfgFiles) configs[f.path] = await f.file.text();
+  setStatus(`Parsing ${n4lFiles.length} file(s) — this takes a few seconds per file…`);
+  const out = await parseN4L(payload, cfgFiles.length ? configs : undefined);
   const fp = await fh.fingerprintFiles(files);
   if (localState) localState.lastFingerprint = fp;
   const errs = out.errors ?? [];
   const dotColor = errs.length ? "yellow" : "green";
   const dotMsg = errs.length
-    ? `Parsed ${out.parsed?.length ?? 0}/${files.length} (${errs.length} failed) at ${new Date().toLocaleTimeString()}`
-    : `Parsed ${files.length} file(s) at ${new Date().toLocaleTimeString()}`;
+    ? `Parsed ${out.parsed?.length ?? 0}/${n4lFiles.length} (${errs.length} failed) at ${new Date().toLocaleTimeString()}`
+    : `Parsed ${n4lFiles.length} file(s) at ${new Date().toLocaleTimeString()}`;
   setDot(dotColor, dotMsg);
   const nodeTotal = out.n1Directory + out.n2Directory + out.n3Directory + out.lt128 + out.lt1024 + out.gt1024;
   let status = `Parsed ${out.parsed?.length ?? 0} file(s). Nodes: ${nodeTotal}, arrows: ${out.arrowTotal}.`;
@@ -438,10 +445,16 @@ async function parseFromFiles(files) {
   const refreshBtn = document.getElementById("sstaas-local-refresh");
   if (refreshBtn) refreshBtn.disabled = true;
   try {
-    const n4ls = files
-      .filter((f) => /\.n4l$/i.test(f.name))
-      .map((f) => ({ name: f.name, path: f.webkitRelativePath || f.name, file: f }));
-    await parseScanResult(n4ls);
+    const picked = files
+      .map((f) => {
+        const path = f.webkitRelativePath || f.name;
+        const isN4L = /\.n4l$/i.test(f.name);
+        const isConfig = /\.sst$/i.test(f.name) && /(^|\/)SSTconfig\//i.test(path);
+        if (!isN4L && !isConfig) return null;
+        return { name: f.name, path, file: f, kind: isConfig ? "config" : "n4l" };
+      })
+      .filter(Boolean);
+    await parseScanResult(picked);
   } catch (err) {
     console.error("parseFromFiles", err);
     setDot("red", "Error: " + err.message);

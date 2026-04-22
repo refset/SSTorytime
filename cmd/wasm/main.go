@@ -102,26 +102,20 @@ func jsParseN4L(this js.Value, args []js.Value) any {
 		if len(args) < 1 {
 			return nil, fmt.Errorf("parseN4L: missing files object")
 		}
-		filesArg := args[0]
-		if filesArg.Type() != js.TypeObject {
-			return nil, fmt.Errorf("parseN4L: argument must be a {filename: text} object")
+		files, sizes, err := readStringMap(args[0], "files")
+		if err != nil {
+			return nil, err
 		}
-		files := map[string]string{}
-		sizes := map[string]int{}
-		keys := js.Global().Get("Object").Call("keys", filesArg)
-		for i := 0; i < keys.Length(); i++ {
-			name := keys.Index(i).String()
-			v := filesArg.Get(name)
-			if v.Type() != js.TypeString {
-				return nil, fmt.Errorf("parseN4L: value for %q must be a string", name)
+		var userConfigs map[string]string
+		if len(args) >= 2 && args[1].Type() == js.TypeObject {
+			userConfigs, _, err = readStringMap(args[1], "configs")
+			if err != nil {
+				return nil, err
 			}
-			text := v.String()
-			files[name] = text
-			sizes[name] = len(text)
 		}
 
 		tParse := time.Now()
-		res, err := n4lparse.Parse(&psst, files)
+		res, err := n4lparse.ParseWithConfigs(&psst, userConfigs, files)
 		parseMs := time.Since(tParse).Milliseconds()
 		if err != nil {
 			return nil, fmt.Errorf("parseN4L: %w", err)
@@ -532,6 +526,28 @@ func packageResponse(kind string, contentJSON string) any {
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// readStringMap decodes a JS {name: text} object into a Go map,
+// returning both the content map and per-key size map.
+func readStringMap(v js.Value, label string) (map[string]string, map[string]int, error) {
+	if v.Type() != js.TypeObject {
+		return nil, nil, fmt.Errorf("parseN4L: %s argument must be a {name: text} object", label)
+	}
+	out := map[string]string{}
+	sizes := map[string]int{}
+	keys := js.Global().Get("Object").Call("keys", v)
+	for i := 0; i < keys.Length(); i++ {
+		name := keys.Index(i).String()
+		val := v.Get(name)
+		if val.Type() != js.TypeString {
+			return nil, nil, fmt.Errorf("parseN4L: %s value for %q must be a string", label, name)
+		}
+		s := val.String()
+		out[name] = s
+		sizes[name] = len(s)
+	}
+	return out, sizes, nil
 }
 
 // promise wraps a Go func returning (jsValue, error) into a JS Promise.

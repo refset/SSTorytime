@@ -61,13 +61,20 @@ type FileError struct {
 	Err  string
 }
 
-// Parse loads the embedded configs, parses each user file in sorted
-// name order, and finishes with CompleteInferences. The caller is
-// responsible for having opened sst and for running GraphToDB afterwards.
-//
-// Any os.Exit / panic in the underlying parser is converted to an
-// error so a bad input file can't abort the host process.
+// Parse: embedded configs + user files. See ParseWithConfigs for the
+// form that also accepts user-supplied SSTconfig/*.sst definitions.
 func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) {
+	return ParseWithConfigs(sst, nil, userFiles)
+}
+
+// ParseWithConfigs loads the embedded default configs, then any
+// userConfigs (typically the .sst files from a sibling SSTconfig/
+// directory in the picked folder — upstream's per-dataset extension
+// point), then parses each user file in sorted name order and runs
+// CompleteInferences. Any panic in a user file is caught per-file
+// and recorded as a FileError; the panic text comes from the real
+// ParseError message, not the generic panic sentinel.
+func ParseWithConfigs(sst *SST.PoSST, userConfigs, userFiles map[string]string) (res Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("n4lparse: %v (line %d in %q)", r, LINE_NUM, CURRENT_FILE)
@@ -84,6 +91,16 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 		}
 		resetParserState(name)
 		ParseConfig(sst, []rune(string(data)))
+	}
+	// User-supplied SSTconfig/*.sst, deterministic order.
+	configNames := make([]string, 0, len(userConfigs))
+	for n := range userConfigs {
+		configNames = append(configNames, n)
+	}
+	sort.Strings(configNames)
+	for _, name := range configNames {
+		resetParserState(name)
+		ParseConfig(sst, []rune(userConfigs[name]))
 	}
 	CONFIGURING = false
 	res.ConfigMs = time.Since(tConfig).Milliseconds()
@@ -126,9 +143,14 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 func parseOneFile(sst *SST.PoSST, name, content string) (fe *FileError) {
 	defer func() {
 		if r := recover(); r != nil {
-			fe = &FileError{File: name, Line: LINE_NUM, Err: fmt.Sprintf("%v", r)}
+			msg := fmt.Sprintf("%v", r)
+			if LAST_PARSE_ERROR != "" {
+				msg = LAST_PARSE_ERROR
+			}
+			fe = &FileError{File: name, Line: LINE_NUM, Err: msg}
 		}
 	}()
+	LAST_PARSE_ERROR = ""
 	resetParserState(name)
 	ParseN4L(sst, []rune(content))
 	return nil

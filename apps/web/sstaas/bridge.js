@@ -83,9 +83,11 @@ function ensureGoRuntime() {
   });
 }
 
-export async function parseN4L(filesObj) {
+export async function parseN4L(filesObj, configsObj) {
   if (!window.__sstWasm) throw new Error("WASM not initialized");
-  const out = await window.__sstWasm.parseN4L(filesObj);
+  const out = configsObj
+    ? await window.__sstWasm.parseN4L(filesObj, configsObj)
+    : await window.__sstWasm.parseN4L(filesObj);
   // out is a JSON string per cmd/wasm/main.go
   return typeof out === "string" ? JSON.parse(out) : out;
 }

@@ -2545,10 +2545,18 @@ func PrintLink(sst SST.PoSST,l SST.Link) {
 
 // **************************************************************************
 
+// LAST_PARSE_ERROR is the most recent ParseError message. The API
+// wrapper reads it when a parse panics so the user sees the real
+// reason (arrow undefined, ditto with no prior line, etc.) instead
+// of the generic "fatal parse error" that the panic() carries.
+var LAST_PARSE_ERROR string
+
 func ParseError(message string) {
 
 	const red = "\033[31;1;1m"
 	const endred = "\033[0m"
+
+	LAST_PARSE_ERROR = message
 
 	fmt.Print("\n",LINE_NUM,":",red)
 	fmt.Println("N4L",CURRENT_FILE,message,"at line", LINE_NUM,endred)

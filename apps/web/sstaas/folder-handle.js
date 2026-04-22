@@ -125,9 +125,15 @@ async function walk(dir, prefix, out) {
     if (name.startsWith(".")) continue; // skip dotfiles / .git etc.
     const path = prefix ? `${prefix}/${name}` : name;
     if (entry.kind === "file") {
-      if (!/\.n4l$/i.test(name)) continue;
+      // .n4l data files; also pick up .sst files living under an
+      // SSTconfig/ subdirectory (upstream's per-dataset convention for
+      // extending arrows/annotations/closures). Everything else is
+      // ignored.
+      const isN4L = /\.n4l$/i.test(name);
+      const isConfig = /\.sst$/i.test(name) && /(^|\/)SSTconfig\//i.test(path);
+      if (!isN4L && !isConfig) continue;
       const file = await entry.getFile();
-      out.push({ name, path, file });
+      out.push({ name, path, file, kind: isConfig ? "config" : "n4l" });
     } else if (entry.kind === "directory") {
       await walk(entry, path, out);
     }
