@@ -266,8 +266,12 @@ func jsSearch(this js.Value, args []js.Value) any {
 				set = rightptrs
 			}
 			if len(set) == 0 {
-				return packageResponse("Error", jsonString(
-					fmt.Sprintf("No nodes match %q.", query))), nil
+				// Return empty Orbits rather than Error: upstream's
+				// FetchPage calls DoOrbitPanel unconditionally on
+				// whatever comes back, and DoOrbitPanel crashes on
+				// any non-Orbits response. Empty Content=[] renders
+				// as "No result" in the UI.
+				return packageResponse("Orbits", "[]"), nil
 			}
 			return buildCausalConesResponse(set, params, sttypes, maxlimit), nil
 		}
