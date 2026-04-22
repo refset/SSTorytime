@@ -16,8 +16,11 @@ import * as drive from "./drive.js";
 import * as assets from "./assets.js";
 import { reindex, setKeepOffline } from "./reindex.js";
 import { parseN4L } from "./bridge.js";
+import { getSessionId } from "./session.js";
+import * as fh from "./folder-handle.js";
 
 const FOLDER_KEY = "sstaas-drive-folder-id";
+const POLL_MS = 30_000;
 
 // ---- Markup injection ----
 
@@ -28,8 +31,19 @@ const CONTROLS_HTML = `
     <button id="sstaas-pick-folder" class="sstaas-btn" hidden>Choose Drive folder</button>
     <code id="sstaas-folder" class="sstaas-folder" hidden></code>
     <button id="sstaas-reindex" class="sstaas-btn primary" hidden>Re-index</button>
-    <label for="sstaas-open-local" class="sstaas-btn" title="Pick a local directory; every .n4l inside is parsed. No Drive required.">Open local n4l directory</label>
-    <input id="sstaas-open-local" type="file" webkitdirectory directory multiple hidden>
+
+    <!-- Local-folder binding. One of these two is visible at a time:
+         the pick button, or the picked-folder row. -->
+    <button id="sstaas-local-pick" class="sstaas-btn" title="Pick a local directory; every .n4l inside is parsed. No Drive required.">Open local n4l directory</button>
+    <input id="sstaas-local-fallback" type="file" webkitdirectory directory multiple hidden>
+
+    <span id="sstaas-local-row" class="sstaas-local-row" hidden>
+      <span id="sstaas-local-dot" class="sstaas-dot" title=""></span>
+      <code id="sstaas-local-name" class="sstaas-folder"></code>
+      <button id="sstaas-local-refresh" class="sstaas-icon-btn" title="Refresh: rescan folder + re-parse">⟳</button>
+      <button id="sstaas-local-clear"   class="sstaas-icon-btn" title="Clear this folder binding (pick another)">×</button>
+    </span>
+
     <span id="sstaas-status" class="sstaas-status"></span>
   </div>`;
 
@@ -78,6 +92,26 @@ const STYLE = `
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sstaas-status { color: #555; font-size: 0.82rem; min-width: 12rem; }
+
+  .sstaas-local-row {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+  }
+  .sstaas-dot {
+    width: 0.65rem; height: 0.65rem; border-radius: 50%;
+    display: inline-block; background: #bbb;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+  }
+  .sstaas-dot.green  { background: #3a9a3a; }
+  .sstaas-dot.yellow { background: #e0b52a; }
+  .sstaas-dot.red    { background: #b33030; }
+  .sstaas-icon-btn {
+    border: 1px solid #c8c8c4; background: #fff; color: #444;
+    width: 1.6rem; height: 1.6rem; padding: 0;
+    border-radius: 4px; cursor: pointer; font-size: 0.95rem;
+    line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .sstaas-icon-btn:hover { background: #efefe9; }
+  .sstaas-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   #sstaas-footer-links {
     margin-left: auto; font-size: 0.85rem; padding-right: 0.75rem;
@@ -202,15 +236,25 @@ export async function injectUI({ isBridgeReady } = {}) {
     refresh();
   });
   document.getElementById("sstaas-reindex").addEventListener("click", () => runReindex());
-  document.getElementById("sstaas-open-local").addEventListener("change", (e) => {
+
+  // Local folder bindings.
+  document.getElementById("sstaas-local-pick").addEventListener("click", onLocalPick);
+  document.getElementById("sstaas-local-fallback").addEventListener("change", (e) => {
     const input = e.target;
     const files = Array.from(input.files ?? []);
     input.value = "";
-    if (files.length) runOpenLocal(files);
+    if (files.length) onLocalFallback(files);
   });
+  document.getElementById("sstaas-local-refresh").addEventListener("click", onLocalRefresh);
+  document.getElementById("sstaas-local-clear").addEventListener("click", onLocalClear);
 
   onAuthChange(refresh);
   refresh();
+
+  // Try to restore a previously-bound folder for this session.
+  restoreLocalFolder().catch((e) => console.warn("restore folder:", e.message));
+  // Poll to turn the dot yellow when files on disk change.
+  setInterval(() => pollForChanges().catch(() => {}), POLL_MS);
 }
 
 function refresh() {
@@ -241,36 +285,187 @@ function setStatus(t) {
   if (el) el.textContent = t;
 }
 
-async function runOpenLocal(files) {
+// ---- Local folder state ----
+//
+// One of these is live at a time for a given session:
+//   { handle, label, lastFingerprint }   (FSAA path — survives reloads)
+//   { label, files, lastFingerprint }    (webkitdirectory fallback — in-memory only)
+// lastFingerprint is whatever the folder looked like AT THE TIME of
+// the last successful parse, so pollForChanges can decide fresh vs stale.
+let localState = null;
+
+function showLocalRow(on) {
+  show("sstaas-local-pick", !on);
+  show("sstaas-local-row", on);
+}
+
+function setDot(kind, tooltip) {
+  const dot = document.getElementById("sstaas-local-dot");
+  if (!dot) return;
+  dot.classList.remove("green", "yellow", "red");
+  if (kind) dot.classList.add(kind);
+  dot.title = tooltip ?? "";
+}
+
+function setLocalName(label) {
+  const el = document.getElementById("sstaas-local-name");
+  if (el) el.textContent = label;
+}
+
+async function onLocalPick() {
   if (!isBridgeReadyRef()) { alert("PGlite/WASM still loading."); return; }
-  // webkitdirectory hands us everything under the picked folder
-  // (recursively) — filter to *.n4l so we don't try to parse binaries
-  // or dot-files.
-  const n4ls = files.filter((f) => /\.n4l$/i.test(f.name));
-  if (n4ls.length === 0) {
-    setStatus(`No .n4l files found in the picked directory (${files.length} total files).`);
+  if (fh.hasFSAA()) {
+    let handle;
+    try {
+      handle = await fh.openPicker();
+    } catch (err) {
+      // User cancelled the picker — don't treat it as an error.
+      if (err && err.name === "AbortError") return;
+      console.error(err);
+      setStatus("Folder pick failed: " + err.message);
+      return;
+    }
+    // Persist the handle. Swallow errors (some environments can't
+    // structured-clone a given handle, or have IDB disabled); the
+    // in-session binding still works either way.
+    try { await fh.store(getSessionId(), handle); }
+    catch (err) { console.warn("[sstaas] couldn't persist folder handle:", err.message); }
+    localState = { handle, label: fh.labelFromHandle(handle), lastFingerprint: "" };
+    showLocalRow(true);
+    setLocalName(localState.label);
+    setDot("yellow", "Newly picked — press refresh to parse");
+    await parseFromHandle();
+  } else {
+    // Fallback: trigger the <input webkitdirectory> picker.
+    document.getElementById("sstaas-local-fallback").click();
+  }
+}
+
+async function onLocalFallback(files) {
+  const label = fh.labelFromFileList(files);
+  localState = { files, label, lastFingerprint: "" };
+  showLocalRow(true);
+  setLocalName(label);
+  setDot("yellow", "Newly picked — press refresh to parse");
+  await parseFromFiles(files);
+}
+
+async function onLocalRefresh() {
+  if (!localState) return;
+  if (localState.handle) {
+    await parseFromHandle();
+  } else if (localState.files) {
+    // In the webkitdirectory fallback we can't re-walk without a
+    // fresh pick — the File objects we captured are static.
+    await parseFromFiles(localState.files);
+  }
+}
+
+async function onLocalClear() {
+  await fh.clear(getSessionId()).catch(() => {});
+  localState = null;
+  showLocalRow(false);
+  setStatus("");
+}
+
+async function restoreLocalFolder() {
+  const sessionId = getSessionId();
+  const handle = await fh.loadStoredHandle(sessionId);
+  if (!handle) return;
+  const perm = await fh.queryPermission(handle);
+  localState = { handle, label: fh.labelFromHandle(handle), lastFingerprint: "" };
+  showLocalRow(true);
+  setLocalName(localState.label);
+  if (perm === "granted") {
+    setDot("yellow", "Restored — press refresh to parse");
+    // Note: cannot auto-parse on load, because the graph lives in
+    // PGlite and PGlite is in-memory — re-parsing is still needed
+    // each time the tab opens. User presses refresh to populate.
+  } else {
+    setDot("red", "Permission needed — press refresh to re-grant");
+  }
+}
+
+async function parseFromHandle() {
+  if (!localState?.handle) return;
+  const refreshBtn = document.getElementById("sstaas-local-refresh");
+  if (refreshBtn) refreshBtn.disabled = true;
+  try {
+    const perm = await fh.queryPermission(localState.handle);
+    if (perm !== "granted") {
+      const granted = await fh.requestPermission(localState.handle);
+      if (granted !== "granted") {
+        setDot("red", "Permission denied");
+        setStatus("Permission denied for " + localState.label);
+        return;
+      }
+    }
+    const files = await fh.scan(localState.handle);
+    await parseScanResult(files);
+  } catch (err) {
+    console.error("parseFromHandle", err);
+    setDot("red", "Error: " + err.message);
+    setStatus("Refresh failed: " + err.message);
+  } finally {
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
+}
+
+// Shared path: takes either an FSAA scan result or a webkitdirectory
+// File[] (wrapped as {name, path, file}) and runs parseN4L over it.
+async function parseScanResult(files) {
+  if (files.length === 0) {
+    setStatus("No .n4l files found in the picked directory.");
+    setDot("red", "No .n4l files");
     return;
   }
-  setStatus(`Reading ${n4ls.length} .n4l file(s)…`);
+  setStatus(`Reading ${files.length} .n4l file(s)…`);
   const payload = {};
+  for (const f of files) payload[f.path] = await f.file.text();
+  setStatus(`Parsing ${files.length} file(s) — this takes a few seconds per file…`);
+  const out = await parseN4L(payload);
+  const fp = await fh.fingerprintFiles(files);
+  if (localState) localState.lastFingerprint = fp;
+  setDot("green", `Parsed ${files.length} file(s) at ${new Date().toLocaleTimeString()}`);
+  setStatus(
+    `Parsed ${out.parsed?.length ?? 0} file(s). ` +
+    `Nodes: ${out.n1Directory + out.n2Directory + out.n3Directory + out.lt128 + out.lt1024 + out.gt1024}, ` +
+    `arrows: ${out.arrowTotal}.`
+  );
+}
+
+async function parseFromFiles(files) {
+  const refreshBtn = document.getElementById("sstaas-local-refresh");
+  if (refreshBtn) refreshBtn.disabled = true;
   try {
-    for (const f of n4ls) {
-      // webkitRelativePath is "<dir>/...path/file.n4l"; use it as the
-      // key so two files with the same basename in different subfolders
-      // don't clobber each other.
-      const key = f.webkitRelativePath || f.name;
-      payload[key] = await f.text();
-    }
-    setStatus(`Parsing ${n4ls.length} file(s) — this takes a few seconds per file…`);
-    const out = await parseN4L(payload);
-    setStatus(
-      `Parsed ${out.parsed?.length ?? 0} file(s). ` +
-      `Nodes: ${out.n1Directory + out.n2Directory + out.n3Directory + out.lt128 + out.lt1024 + out.gt1024}, ` +
-      `arrows: ${out.arrowTotal}.`
-    );
+    const n4ls = files
+      .filter((f) => /\.n4l$/i.test(f.name))
+      .map((f) => ({ name: f.name, path: f.webkitRelativePath || f.name, file: f }));
+    await parseScanResult(n4ls);
   } catch (err) {
-    console.error("open-local failed", err);
+    console.error("parseFromFiles", err);
+    setDot("red", "Error: " + err.message);
     setStatus("Open local failed: " + err.message);
+  } finally {
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
+}
+
+// Polled by setInterval. Only meaningful on the FSAA path (the
+// webkitdirectory fallback can't rescan without a fresh user pick).
+async function pollForChanges() {
+  if (!localState?.handle || !localState.lastFingerprint) return;
+  const perm = await fh.queryPermission(localState.handle);
+  if (perm !== "granted") return; // don't surprise-prompt the user from a timer
+  const files = await fh.scan(localState.handle);
+  const fp = await fh.fingerprintFiles(files);
+  const dot = document.getElementById("sstaas-local-dot");
+  if (!dot) return;
+  if (fp !== localState.lastFingerprint) {
+    setDot("yellow", "Files changed on disk since last parse — press refresh");
+  } else if (!dot.classList.contains("green")) {
+    // Don't flip back to green if we're in an error state.
+    if (!dot.classList.contains("red")) setDot("green", "Up to date");
   }
 }
 
