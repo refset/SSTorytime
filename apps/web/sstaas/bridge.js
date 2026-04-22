@@ -39,6 +39,14 @@ export async function initWasm() {
     await new Promise((r) => setTimeout(r, 25));
   }
   if (!window.__sstWasm) throw new Error("WASM loaded but __sstWasm never appeared");
+
+  // Bootstrap the SST session (CREATE TYPE / CREATE TABLE / CREATE
+  // FUNCTION via the pglite-js sql.Driver). This is the heavy lift —
+  // it runs upstream's Configure() against PGlite. Any error here
+  // surfaces back to the SPA's status line.
+  const openOut = await window.__sstWasm.open();
+  console.log("SST.OpenWasm:", openOut);
+
   wasmStarted = true;
 }
 

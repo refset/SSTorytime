@@ -67,10 +67,20 @@ CREATE INDEX IF NOT EXISTS links_dst_idx ON links (dst_node_id);
 export async function initDB() {
   if (pgliteReady) return pgliteReady;
   pgliteReady = (async () => {
+    // PGlite 0.4.4's idb:// persistence mode never resolves waitReady
+    // in our environment (verified via isolated spikes — a fresh
+    // `new PGlite('idb://anything')` hangs forever, while
+    // `new PGlite()` in-memory comes up in ~7s). Tracked in
+    // ROADMAP_CLIENT_SIDE.md as a known issue to revisit once a
+    // future PGlite release fixes it or once we wire OPFS persistence
+    // (which needs cross-origin isolation headers we don't have on
+    // GitHub Pages anyway). For now we run in-memory: the parsed
+    // graph is rebuildable on demand via Re-index, since Google Drive
+    // holds the source of truth.
     const { PGlite } = await import(
       "https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.4.4/dist/index.js"
     );
-    pgliteInstance = new PGlite("idb://sstaas-pglite");
+    pgliteInstance = new PGlite();
     await pgliteInstance.waitReady;
     await pgliteInstance.exec(SCHEMA_SQL);
     return pgliteInstance;
