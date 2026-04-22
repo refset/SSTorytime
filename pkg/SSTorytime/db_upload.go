@@ -82,17 +82,11 @@ func GraphToDB(sst PoSST,wait_counter bool) {
 		panic("SSTorytime: fatal error")
 	}
 
-	for arrow := range sst.ARROW_DIRECTORY {
-
-		UploadArrowToDB(sst,ArrowPtr(arrow))
-	}
+	UploadAllArrowsToDB(sst)
 
 	fmt.Println("Storing inverse Arrows...")
 
-	for arrow := range sst.INVERSE_ARROWS {
-
-		UploadInverseArrowToDB(sst,ArrowPtr(arrow))
-	}
+	UploadAllInverseArrowsToDB(sst)
 
 	fmt.Println("Storing contexts...")
 
@@ -156,6 +150,48 @@ func UploadNodeToDB(sst *PoSST, org Node) {
 }
 
 // **************************************************************************
+
+// UploadAllArrowsToDB batches every arrow insert into one multi-
+// statement query. Much cheaper than one round-trip per arrow when
+// the driver is a Promise-bridged embedded PGlite (the WASM build),
+// and strictly faster on native Postgres too.
+func UploadAllArrowsToDB(sst PoSST) {
+	if len(sst.ARROW_DIRECTORY) == 0 {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("BEGIN;\n")
+	for arrow := range sst.ARROW_DIRECTORY {
+		a := ArrowPtr(arrow)
+		staidx := sst.ARROW_DIRECTORY[a].STAindex
+		long := SQLEscape(sst.ARROW_DIRECTORY[a].Long)
+		short := SQLEscape(sst.ARROW_DIRECTORY[a].Short)
+		fmt.Fprintf(&b, "INSERT INTO ArrowDirectory (STAindex,Long,Short,ArrPtr) SELECT %d,'%s','%s',%d WHERE NOT EXISTS (SELECT Long,Short,ArrPtr FROM ArrowDirectory WHERE lower(Long) = lower('%s') OR lower(Short) = lower('%s') OR ArrPtr = %d);\n",
+			staidx, long, short, a, long, short, a)
+	}
+	b.WriteString("COMMIT;")
+	if _, err := sst.DB.Query(b.String()); err != nil {
+		fmt.Println("UploadAllArrowsToDB failed:", err)
+	}
+}
+
+func UploadAllInverseArrowsToDB(sst PoSST) {
+	if len(sst.INVERSE_ARROWS) == 0 {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("BEGIN;\n")
+	for arrow := range sst.INVERSE_ARROWS {
+		plus := ArrowPtr(arrow)
+		minus := sst.INVERSE_ARROWS[plus]
+		fmt.Fprintf(&b, "INSERT INTO ArrowInverses (Plus,Minus) SELECT %d,%d WHERE NOT EXISTS (SELECT Plus,Minus FROM ArrowInverses WHERE Plus = %d OR minus = %d);\n",
+			plus, minus, plus, minus)
+	}
+	b.WriteString("COMMIT;")
+	if _, err := sst.DB.Query(b.String()); err != nil {
+		fmt.Println("UploadAllInverseArrowsToDB failed:", err)
+	}
+}
 
 func UploadArrowToDB(sst PoSST,arrow ArrowPtr) {
 

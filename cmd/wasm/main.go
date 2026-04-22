@@ -26,6 +26,7 @@ import (
 	"sort"
 	"sync"
 	"syscall/js"
+	"time"
 
 	SST "github.com/markburgess/SSTorytime/pkg/SSTorytime"
 	"github.com/markburgess/SSTorytime/pkg/n4lparse"
@@ -119,18 +120,24 @@ func jsParseN4L(this js.Value, args []js.Value) any {
 			sizes[name] = len(text)
 		}
 
+		tParse := time.Now()
 		res, err := n4lparse.Parse(&psst, files)
+		parseMs := time.Since(tParse).Milliseconds()
 		if err != nil {
 			return nil, fmt.Errorf("parseN4L: %w", err)
 		}
 
+		tFlush := time.Now()
 		SST.GraphToDB(psst, false)
+		flushMs := time.Since(tFlush).Milliseconds()
 
 		out := map[string]any{
 			"ok":          true,
 			"files":       sizes,
 			"parsed":      res.Files,
 			"errors":      res.Errors,
+			"parseMs":     parseMs,
+			"flushMs":     flushMs,
 			"n1Directory": res.N1Directory,
 			"n2Directory": res.N2Directory,
 			"n3Directory": res.N3Directory,

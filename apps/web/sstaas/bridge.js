@@ -19,13 +19,35 @@ export async function initWasm() {
   // on success, or rejects with an Error on SQL failure. Rejection is
   // important: Go's bridge distinguishes resolve vs. reject and turns
   // the latter into an `error` return from Query/Exec.
+  // __sstProfile: counter + total PGlite time for coarse profiling.
+  // Call window.__sstProfile.reset() before a run, read after.
+  window.__sstProfile = {
+    queries: 0, totalMs: 0, slowest: [],
+    reset() { this.queries = 0; this.totalMs = 0; this.slowest = []; },
+  };
+
   window.__sstQuery = async (sql, paramsJSON) => {
     let params = [];
     if (paramsJSON && paramsJSON !== "[]" && paramsJSON !== "null") {
       try { params = JSON.parse(paramsJSON); }
       catch { throw new Error("__sstQuery: bad params JSON"); }
     }
-    return await dbQuery(sql, params);
+    const t0 = performance.now();
+    try {
+      return await dbQuery(sql, params);
+    } finally {
+      const dt = performance.now() - t0;
+      const p = window.__sstProfile;
+      p.queries++;
+      p.totalMs += dt;
+      if (dt > 50) {
+        p.slowest.push({ ms: +dt.toFixed(1), sql: sql.slice(0, 120) });
+        if (p.slowest.length > 20) {
+          p.slowest.sort((a, b) => b.ms - a.ms);
+          p.slowest.length = 20;
+        }
+      }
+    }
   };
 
   // Load the Go runtime and the WASM module.
