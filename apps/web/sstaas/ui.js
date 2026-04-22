@@ -417,12 +417,21 @@ async function parseScanResult(files) {
   const out = await parseN4L(payload);
   const fp = await fh.fingerprintFiles(files);
   if (localState) localState.lastFingerprint = fp;
-  setDot("green", `Parsed ${files.length} file(s) at ${new Date().toLocaleTimeString()}`);
-  setStatus(
-    `Parsed ${out.parsed?.length ?? 0} file(s). ` +
-    `Nodes: ${out.n1Directory + out.n2Directory + out.n3Directory + out.lt128 + out.lt1024 + out.gt1024}, ` +
-    `arrows: ${out.arrowTotal}.`
-  );
+  const errs = out.errors ?? [];
+  const dotColor = errs.length ? "yellow" : "green";
+  const dotMsg = errs.length
+    ? `Parsed ${out.parsed?.length ?? 0}/${files.length} (${errs.length} failed) at ${new Date().toLocaleTimeString()}`
+    : `Parsed ${files.length} file(s) at ${new Date().toLocaleTimeString()}`;
+  setDot(dotColor, dotMsg);
+  const nodeTotal = out.n1Directory + out.n2Directory + out.n3Directory + out.lt128 + out.lt1024 + out.gt1024;
+  let status = `Parsed ${out.parsed?.length ?? 0} file(s). Nodes: ${nodeTotal}, arrows: ${out.arrowTotal}.`;
+  if (errs.length) {
+    const lines = errs.slice(0, 5).map((e) => `  • ${e.File} (line ${e.Line}): ${e.Err}`);
+    if (errs.length > 5) lines.push(`  • …and ${errs.length - 5} more`);
+    status += ` Failed files:\n` + lines.join("\n");
+    console.warn("[sstaas parse]", errs);
+  }
+  setStatus(status);
 }
 
 async function parseFromFiles(files) {

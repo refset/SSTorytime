@@ -81,8 +81,12 @@ async function readBody(init) {
 // main.js treats the response as the raw envelope it used to get from
 // the Go server, so we return that envelope verbatim.
 async function handleSearchN4L(body) {
+  // Note: empty query goes through to WASM, not short-circuited to
+  // Error here — upstream's FetchPage (initial page load) calls
+  // DoOrbitPanel unconditionally on the response, and DoOrbitPanel
+  // crashes on anything except an Orbits envelope. jsSearch returns
+  // an empty-Orbits response for empty queries so that path is safe.
   const name = (body.name ?? body.query ?? "").trim();
-  if (!name) return packageResponse("Error", JSON.stringify("(empty query)"));
   const raw = await wasmSearch(name);
   return typeof raw === "string" ? JSON.parse(raw) : raw;
 }

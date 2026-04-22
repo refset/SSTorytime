@@ -130,6 +130,7 @@ func jsParseN4L(this js.Value, args []js.Value) any {
 			"ok":          true,
 			"files":       sizes,
 			"parsed":      res.Files,
+			"errors":      res.Errors,
 			"n1Directory": res.N1Directory,
 			"n2Directory": res.N2Directory,
 			"n3Directory": res.N3Directory,

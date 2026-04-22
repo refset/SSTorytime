@@ -36,15 +36,25 @@ var configOrder = []string{
 }
 
 // Result summarizes what Parse did. Counts are post-parse, pre-flush.
+// Errors is a per-file list of failures so one malformed file in a
+// batch doesn't hide the rest — the caller decides whether to flush
+// or abort.
 type Result struct {
-	Files         []string
-	N1Directory   int
-	N2Directory   int
-	N3Directory   int
-	LT128         int
-	LT1024        int
-	GT1024        int
-	ArrowTotal    int
+	Files       []string
+	Errors      []FileError
+	N1Directory int
+	N2Directory int
+	N3Directory int
+	LT128       int
+	LT1024      int
+	GT1024      int
+	ArrowTotal  int
+}
+
+type FileError struct {
+	File string
+	Line int
+	Err  string
 }
 
 // Parse loads the embedded configs, parses each user file in sorted
@@ -81,8 +91,10 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 	sort.Strings(names)
 
 	for _, name := range names {
-		resetParserState(name)
-		ParseN4L(sst, []rune(userFiles[name]))
+		if fe := parseOneFile(sst, name, userFiles[name]); fe != nil {
+			res.Errors = append(res.Errors, *fe)
+			continue
+		}
 		res.Files = append(res.Files, name)
 	}
 
@@ -97,6 +109,20 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 	res.GT1024 = len(sst.NODE_DIRECTORY.GT1024)
 	res.ArrowTotal = int(sst.ARROW_DIRECTORY_TOP)
 	return res, nil
+}
+
+// parseOneFile parses a single file inside its own recover so a panic
+// (parser fatal) is captured as a FileError and the outer batch can
+// continue with the next file.
+func parseOneFile(sst *SST.PoSST, name, content string) (fe *FileError) {
+	defer func() {
+		if r := recover(); r != nil {
+			fe = &FileError{File: name, Line: LINE_NUM, Err: fmt.Sprintf("%v", r)}
+		}
+	}()
+	resetParserState(name)
+	ParseN4L(sst, []rune(content))
+	return nil
 }
 
 // resetParserState mirrors NewFile() but skips the os.Stat +
