@@ -137,27 +137,22 @@ Branch base: upstream tip (`b09c915` at fork time).
 - **Loading splash.** Full-viewport overlay with pulsing dots hides
   the SPA until PGlite + WASM + OpenWasm are ready. Messages step
   through phases; sticks red on bootstrap failure.
+- **`?search=...` deep links.** Upstream `InitializeApp()` fires
+  `sendLinkSearch` from DOMContentLoaded, long before WASM is up.
+  Bootstrap now publishes `window.__sstaasReady` synchronously
+  *before* `installFetchShim`, and the shim awaits it before
+  dispatching — so deep-linked searches queue cleanly instead of
+  hitting "WASM not initialized" and hanging upstream's Hipnotize
+  loader (which has no `stopHipnotize` on the error path).
 
 ### Still TODO (the honest list)
 
 #### Search features not yet ported from upstream HandleSearch
 
-Currently wired: Orbits (name search), minimal TOC, and explanatory
-"not yet wired" errors for the rest. The gaps:
+Currently wired: Orbits (name search), minimal TOC, `\sequence` /
+`\stories`, `\stats`, `\page N`, `\arrow` listings, and `\from` /
+`\to` (both causal cones and path-solve). The gaps:
 
-- **`\stories` / `\sequence`** (`HandleStories`) — traverses `then`/
-  sequence arrows to reconstruct narratives. Lightest of the
-  unwired branches.
-- **`\from X \to Y`** (`HandlePathSolve`) — paths between two node
-  sets, with betweenness centrality + SuperNodes analysis. Pulls in
-  `GetPathsAndSymmetries`, `BetweenNessCentrality`, `SuperNodes`.
-- **`\from X` or `\to X` alone** (`HandleCausalCones`) — forward/
-  backward causal cones. Needs `PackageConeFromOrigin`.
-- **`\stats`** (`ShowStats`) — summary numbers over a result set.
-- **`\page N`** (`HandlePageMap`) — look up notes by page number
-  against the `PageMap` table.
-- **`\arrow "foo"` and arrow-only filters** (`HandleMatchingArrows`) —
-  arrow-type listings.
 - **`\lastnptr` + session STM** (`UpdateLastSawSection` /
   `UpdateLastSawNPtr`) — records what the user most-recently viewed.
   Also feeds back into `Intent` / `Ambient`, which we currently

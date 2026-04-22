@@ -190,23 +190,51 @@ func jsSearch(this js.Value, args []js.Value) any {
 			return packageResponse("Orbits", "[]"), nil
 		}
 
-		// Unsupported-for-now queries still return Error; upstream
-		// sendLinkSearch (search-box flow) handles Error cleanly
-		// (just logs), and these never come in via FetchPage.
-		var unsupported string
-		switch {
-		case params.Stats:
-			unsupported = "\\stats (statistics) not yet wired."
-		case params.Sequence:
-			unsupported = "\\sequence / \\story not yet wired."
-		case params.PageNr > 0:
-			unsupported = "\\page lookups not yet wired."
-		case from || to:
-			unsupported = "\\from / \\to path queries not yet wired."
+		// Arrow name filters from the query (e.g. \arrow "then") —
+		// resolved here because HandleStories wants them and we may
+		// also need them for node-solving below.
+		arrowptrs, sttypes := SST.ArrowPtrFromArrowsNames(&psst, params.Arrows)
+
+		// \sequence / \story: traverse a specific arrow (default !then!)
+		// through the solved node set and return a Sequence envelope
+		// whose Content is a flat list of NodeEvents along each axis.
+		if params.Sequence {
+			if len(params.Name) == 0 {
+				params.Name = append(params.Name, "any")
+			}
+			nptrs := SST.SolveNodePtrs(psst, params.Name, params, arrowptrs, maxlimit)
+			return buildSequenceResponse(nptrs, arrowptrs, sttypes, maxlimit), nil
 		}
-		if unsupported != "" {
-			return packageResponse("Error", jsonString(unsupported)), nil
+
+		// Arrow-only query (\arrow "foo" / \+ / \-, etc.): list the
+		// arrow directory entries matching the arrow names or ST
+		// types from the query. Mirrors HandleMatchingArrows.
+		arrowsOnly := (arrowptrs != nil || sttypes != nil) &&
+			!name && !from && !to && !chapter && !context && !params.Sequence && params.PageNr == 0
+		if arrowsOnly {
+			return buildArrowsResponse(arrowptrs, sttypes), nil
 		}
+
+		// \page N: mirrors HandlePageMap. With chapter → one lookup
+		// scoped to that chapter; otherwise one lookup per name. We
+		// skip FilterSeen (search.Horizon) because the WASM build
+		// doesn't update LastSeen rows per-session.
+		if params.PageNr > 0 {
+			return buildPageMapResponse(params), nil
+		}
+
+		// \stats: mirrors ShowStats — LastSeen rows for the solved
+		// node set (or a global summary when the name list is empty).
+		// We don't yet track STM updates in the WASM build, so these
+		// rows are whatever has been written to LastSeen directly.
+		if params.Stats {
+			var nptrs []SST.NodePtr
+			if name {
+				nptrs = SST.SolveNodePtrs(psst, params.Name, params, arrowptrs, maxlimit)
+			}
+			return buildStatsResponse(nptrs), nil
+		}
+
 
 		// Chapter/context listing (\toc, \chapter, \in, etc.) →
 		// TOC response with a minimal ChCtx list. We don't yet
@@ -215,6 +243,32 @@ func jsSearch(this js.Value, args []js.Value) any {
 		// see what's in the graph and click through.
 		if (chapter || context) && !name {
 			return buildTOCResponse(params, maxlimit), nil
+		}
+
+		// \from / \to (path or causal cone). When both sides present
+		// we solve a bounded path search + BetweenNessCentrality +
+		// SuperNodes. With just one side we emit a causal cone.
+		if from || to {
+			var leftptrs, rightptrs []SST.NodePtr
+			if from {
+				leftptrs = SST.SolveNodePtrs(psst, params.From, params, arrowptrs, maxlimit)
+			}
+			if to {
+				rightptrs = SST.SolveNodePtrs(psst, params.To, params, arrowptrs, maxlimit)
+			}
+			minlimit, _ := SST.MinMaxPolicy(params)
+			if from && to {
+				return buildPathSolveResponse(leftptrs, rightptrs, params, arrowptrs, sttypes, minlimit, maxlimit), nil
+			}
+			set := leftptrs
+			if set == nil {
+				set = rightptrs
+			}
+			if len(set) == 0 {
+				return packageResponse("Error", jsonString(
+					fmt.Sprintf("No nodes match %q.", query))), nil
+			}
+			return buildCausalConesResponse(set, params, sttypes, maxlimit), nil
 		}
 
 		nptrs := SST.SolveNodePtrs(psst, params.Name, params, nil, maxlimit)
@@ -238,6 +292,176 @@ func jsSearch(this js.Value, args []js.Value) any {
 		}
 		return packageResponse("Orbits", string(data)), nil
 	})
+}
+
+// buildPathSolveResponse mirrors HandlePathSolve: bounded path search
+// between two node sets, then BetweenNessCentrality + SuperNodes.
+// Returns a "PathSolve" envelope (empty "[]" when no solutions).
+func buildPathSolveResponse(leftptrs, rightptrs []SST.NodePtr, params SST.SearchParameters,
+	arrowptrs []SST.ArrowPtr, sttypes []int, mindepth, maxdepth int) any {
+	solutions := SST.GetPathsAndSymmetries(&psst, leftptrs, rightptrs,
+		params.Chapter, params.Context, arrowptrs, sttypes, mindepth, maxdepth)
+	if len(solutions) == 0 {
+		return packageResponse("PathSolve", "[]")
+	}
+	var soln SST.WebConePaths
+	soln.RootNode = solutions[0][0].Dst
+	soln.Title = fmt.Sprintf("paths solutions from %v to %v", params.From, params.To)
+	soln.BTWC = SST.BetweenNessCentrality(psst, solutions)
+	soln.SuperNodes = SST.SuperNodes(psst, solutions, maxdepth)
+	soln.Paths = SST.LinkWebPaths(&psst, solutions, 0, params.Chapter, params.Context, 1, maxdepth)
+	data, _ := json.Marshal([]SST.WebConePaths{soln})
+	return packageResponse("PathSolve", string(data))
+}
+
+// buildCausalConesResponse mirrors HandleCausalCones: forward and
+// (for sttype != 0) backward cones for each seed node. PackageCone-
+// FromOrigin lives in upstream's http_server.go, not pkg/SSTorytime,
+// so we inline it here.
+func buildCausalConesResponse(nptrs []SST.NodePtr, params SST.SearchParameters,
+	sttypes []int, limit int) any {
+	if len(sttypes) == 0 {
+		sttypes = []int{0, 1, 2, 3}
+	}
+	var cones []SST.WebConePaths
+	total := 1
+	for n := range nptrs {
+		for st := range sttypes {
+			subcone, count := packageConeFromOrigin(
+				nptrs[n], n, sttypes[st], params.Chapter, params.Context, len(nptrs), limit)
+			cones = append(cones, subcone)
+			total += count
+			if total > limit {
+				break
+			}
+		}
+		if total > limit {
+			break
+		}
+	}
+	if cones == nil {
+		cones = []SST.WebConePaths{}
+	}
+	data, _ := json.Marshal(cones)
+	return packageResponse("ConePaths", string(data))
+}
+
+func packageConeFromOrigin(nptr SST.NodePtr, nth, sttype int,
+	chap string, context []string, dimnptr, limit int) (SST.WebConePaths, int) {
+	var wpaths [][]SST.WebPath
+	fcone, count := SST.GetFwdPathsAsLinks(&psst, nptr, sttype, limit, limit)
+	wpaths = append(wpaths, SST.LinkWebPaths(&psst, fcone, nth, chap, context, dimnptr, limit)...)
+	if sttype != 0 {
+		bcone, countb := SST.GetFwdPathsAsLinks(&psst, nptr, -sttype, limit, limit)
+		wpaths = append(wpaths, SST.LinkWebPaths(&psst, bcone, nth, chap, context, dimnptr, limit)...)
+		count += countb
+	}
+	return SST.WebConePaths{
+		RootNode: nptr,
+		Title:    SST.GetDBNodeByNodePtr(&psst, nptr).S,
+		Paths:    wpaths,
+	}, count
+}
+
+// arrowListEntry matches the ad-hoc struct upstream's
+// HandleMatchingArrows emits. Field names must match so upstream
+// main.js's arrow listing UI sees the shape it expects.
+type arrowListEntry struct {
+	ArrPtr  SST.ArrowPtr
+	ASTtype int
+	Short   string
+	Long    string
+	InvPtr  SST.ArrowPtr
+	ISTtype int
+	InvS    string
+	InvL    string
+}
+
+func buildArrowsResponse(arrowptrs []SST.ArrowPtr, sttypes []int) any {
+	var out []arrowListEntry
+	appendArrow := func(aptr SST.ArrowPtr, adir SST.ArrowDirectory) {
+		inv := SST.GetDBArrowByPtr(&psst, psst.INVERSE_ARROWS[aptr])
+		out = append(out, arrowListEntry{
+			ArrPtr:  aptr,
+			ASTtype: SST.STIndexToSTType(adir.STAindex),
+			Short:   adir.Short,
+			Long:    adir.Long,
+			InvPtr:  inv.Ptr,
+			ISTtype: SST.STIndexToSTType(inv.STAindex),
+			InvS:    inv.Short,
+			InvL:    inv.Long,
+		})
+	}
+	for a := range arrowptrs {
+		appendArrow(arrowptrs[a], SST.GetDBArrowByPtr(&psst, arrowptrs[a]))
+	}
+	if arrowptrs == nil {
+		for st := range sttypes {
+			for _, adir := range SST.GetDBArrowBySTType(psst, sttypes[st]) {
+				appendArrow(adir.Ptr, adir)
+			}
+		}
+	}
+	if out == nil {
+		out = []arrowListEntry{}
+	}
+	data, _ := json.Marshal(out)
+	return packageResponse("Arrows", string(data))
+}
+
+// buildPageMapResponse mirrors the \page N branch of HandleSearch +
+// HandlePageMap: look up notes by page number, scoped to the chapter
+// if present or else iterated over each named node.
+func buildPageMapResponse(params SST.SearchParameters) any {
+	var notes []SST.PageMap
+	if params.Chapter != "" {
+		notes = SST.GetDBPageMap(psst, params.Chapter, params.Context, params.PageNr)
+	} else {
+		for n := range params.Name {
+			notes = append(notes,
+				SST.GetDBPageMap(psst, params.Name[n], params.Context, params.PageNr)...)
+		}
+	}
+	return packageResponse("PageMap", SST.JSONPage(psst, notes))
+}
+
+// buildStatsResponse mirrors ShowStats: either a global LastSeen dump
+// (when the user didn't name any nodes) or per-node LastSeen rows.
+// Upstream's envelope kind is "STAT".
+func buildStatsResponse(nptrs []SST.NodePtr) any {
+	var rows []SST.LastSeen
+	if nptrs == nil {
+		rows = SST.GetLastSawSection(psst)
+	} else {
+		for n := range nptrs {
+			rows = append(rows, SST.GetLastSawNPtr(psst, nptrs[n]))
+		}
+	}
+	if rows == nil {
+		rows = []SST.LastSeen{}
+	}
+	data, _ := json.Marshal(rows)
+	return packageResponse("STAT", string(data))
+}
+
+// buildSequenceResponse mirrors HandleStories: run GetSequenceContainers
+// over the solved node set (defaulting to the !then! arrow if the user
+// didn't name any), then flatten every story's Axis into one list of
+// NodeEvents. Returns a "Sequence" envelope.
+func buildSequenceResponse(nptrs []SST.NodePtr, arrowptrs []SST.ArrowPtr, sttypes []int, limit int) any {
+	if arrowptrs == nil {
+		arrowptrs, sttypes = SST.ArrowPtrFromArrowsNames(&psst, []string{"!then!"})
+	}
+	stories := SST.GetSequenceContainers(&psst, nptrs, arrowptrs, sttypes, limit)
+	var events []SST.NodeEvent
+	for s := range stories {
+		events = append(events, stories[s].Axis...)
+	}
+	if events == nil {
+		events = []SST.NodeEvent{}
+	}
+	data, _ := json.Marshal(events)
+	return packageResponse("Sequence", string(data))
 }
 
 // buildTOCResponse: minimal equivalent of upstream's ShowChapterContexts.

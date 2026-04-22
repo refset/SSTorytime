@@ -20,24 +20,33 @@ function withSplashOnce(fn) {
 }
 withSplashOnce(() => showSplash());
 
+// Publish the ready promise synchronously BEFORE installFetchShim
+// runs — otherwise the queued fetches replayed by flushFetchQueue
+// resume with __sstaasReady still undefined, skip the await, and
+// dispatch to WASM before it's up. See fetch-shim.js for why.
 let bridgeReady = false;
-const ready = (async () => {
+let resolveReady, rejectReady;
+const ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
+window.__sstaasReady = () => ready;
+
+(async () => {
   installFetchShim();
   withSplashOnce(() => setSplashMessage("Initialising local database…"));
   await initDB();
   withSplashOnce(() => setSplashMessage("Starting WASM runtime…"));
   await initWasm();
   bridgeReady = true;
-  // Light up upstream's status indicators so the user sees we're alive.
   document.getElementById("server-status")?.classList.add("ok");
   document.getElementById("database-status")?.classList.add("ok");
   hideSplash();
+  resolveReady();
 })().catch((err) => {
   console.error("[sstaas bootstrap]", err);
   setSplashMessage("Bootstrap failed: " + err.message, true);
   document.getElementById("sstaas-status")?.replaceChildren(
     document.createTextNode("Bootstrap failed: " + err.message)
   );
+  rejectReady(err);
 });
 
 // Inject UI as soon as DOM is parsed; injection itself is fine without
@@ -53,5 +62,3 @@ if (document.readyState === "loading") {
   start();
 }
 
-// Expose for debugging.
-window.__sstaasReady = () => ready;

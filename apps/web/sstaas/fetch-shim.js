@@ -30,6 +30,15 @@ export function installFetchShim() {
     const handler = HANDLERS[path];
     if (!handler) return origFetch(input, init);
     try {
+      // Upstream's InitializeApp() fires sendLinkSearch() from the
+      // DOMContentLoaded handler, which happens long before PGlite +
+      // WASM + OpenWasm finish. If we dispatched immediately we'd
+      // throw "WASM not initialized"; the shim would return a 500;
+      // upstream's sendLinkSearch would swallow that via .catch and
+      // never call stopHipnotize() — leaving the loader spinning
+      // forever. Block until the bridge is up so the first user-
+      // visible response comes back cleanly instead.
+      await window.__sstaasReady?.();
       const body = await readBody(init);
       const responseJSON = await handler(body);
       return new Response(JSON.stringify(responseJSON), {
