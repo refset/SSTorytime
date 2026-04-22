@@ -147,24 +147,39 @@ type NodeDirectory struct {
 	// Power law n-gram frequencies
 
 	N1grams map[string]ClassedNodePtr
+	N1grams_lc map[string]bool
 	N1directory []Node
 	N1_top ClassedNodePtr
 
 	N2grams map[string]ClassedNodePtr
+	N2grams_lc map[string]bool
 	N2directory []Node
 	N2_top ClassedNodePtr
 
 	N3grams map[string]ClassedNodePtr
+	N3grams_lc map[string]bool
 	N3directory []Node
 	N3_top ClassedNodePtr
 
-	// Use linear search on these exp fewer long strings
+	// Long-string classes. The comment above used to say "use linear
+	// search on these exp fewer long strings", but in practice an
+	// N4L corpus with thousands of sentences (e.g. chinese.n4l) hits
+	// LT1024 hard and the O(n²) LinearFindText dominated parse time.
+	// We now maintain a lower-cased-key map alongside each slice and
+	// consult that first; the slice stays the source of truth for
+	// iteration order, but membership checks are O(1).
 
 	LT128 []Node
+	LT128grams map[string]ClassedNodePtr
+	LT128grams_lc map[string]bool
 	LT128_top ClassedNodePtr
 	LT1024 []Node
+	LT1024grams map[string]ClassedNodePtr
+	LT1024grams_lc map[string]bool
 	LT1024_top ClassedNodePtr
 	GT1024 []Node
+	GT1024grams map[string]ClassedNodePtr
+	GT1024grams_lc map[string]bool
 	GT1024_top ClassedNodePtr
 }
 

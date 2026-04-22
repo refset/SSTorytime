@@ -18,6 +18,7 @@ import (
 	"embed"
 	"fmt"
 	"sort"
+	"time"
 
 	SST "github.com/markburgess/SSTorytime/pkg/SSTorytime"
 )
@@ -42,6 +43,9 @@ var configOrder = []string{
 type Result struct {
 	Files       []string
 	Errors      []FileError
+	ConfigMs    int64
+	FilesMs     int64
+	InferMs     int64
 	N1Directory int
 	N2Directory int
 	N3Directory int
@@ -70,7 +74,7 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 		}
 	}()
 
-	// 1. Arrow/annotation/closure configs (runs once per session).
+	tConfig := time.Now()
 	AddMandatory(sst)
 	CONFIGURING = true
 	for _, name := range configOrder {
@@ -82,6 +86,7 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 		ParseConfig(sst, []rune(string(data)))
 	}
 	CONFIGURING = false
+	res.ConfigMs = time.Since(tConfig).Milliseconds()
 
 	// 2. User files, in deterministic (name) order.
 	names := make([]string, 0, len(userFiles))
@@ -90,6 +95,7 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 	}
 	sort.Strings(names)
 
+	tFiles := time.Now()
 	for _, name := range names {
 		if fe := parseOneFile(sst, name, userFiles[name]); fe != nil {
 			res.Errors = append(res.Errors, *fe)
@@ -97,9 +103,12 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 		}
 		res.Files = append(res.Files, name)
 	}
+	res.FilesMs = time.Since(tFiles).Milliseconds()
 
 	// 3. Post-process (NEAR cliques, etc).
+	tInfer := time.Now()
 	CompleteInferences(sst)
+	res.InferMs = time.Since(tInfer).Milliseconds()
 
 	res.N1Directory = len(sst.NODE_DIRECTORY.N1directory)
 	res.N2Directory = len(sst.NODE_DIRECTORY.N2directory)

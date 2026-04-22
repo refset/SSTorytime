@@ -33,6 +33,7 @@ func AppendTextToDirectory(sst *PoSST,event Node,ErrFunc func(string)) NodePtr {
 		return node_alloc_ptr
 	}
 
+	lc := strings.ToLower(event.S)
 	switch event.NPtr.Class {
 	case N1GRAM:
 		cnode_slot = sst.NODE_DIRECTORY.N1_top
@@ -40,7 +41,8 @@ func AppendTextToDirectory(sst *PoSST,event Node,ErrFunc func(string)) NodePtr {
 		event.NPtr = node_alloc_ptr
 		sst.NODE_DIRECTORY.N1directory = append(sst.NODE_DIRECTORY.N1directory,event)
 		sst.NODE_DIRECTORY.N1grams[event.S] = cnode_slot
-		sst.NODE_DIRECTORY.N1_top++ 
+		sst.NODE_DIRECTORY.N1grams_lc[lc] = true
+		sst.NODE_DIRECTORY.N1_top++
 		return node_alloc_ptr
 	case N2GRAM:
 		cnode_slot = sst.NODE_DIRECTORY.N2_top
@@ -48,6 +50,7 @@ func AppendTextToDirectory(sst *PoSST,event Node,ErrFunc func(string)) NodePtr {
 		event.NPtr = node_alloc_ptr
 		sst.NODE_DIRECTORY.N2directory = append(sst.NODE_DIRECTORY.N2directory,event)
 		sst.NODE_DIRECTORY.N2grams[event.S] = cnode_slot
+		sst.NODE_DIRECTORY.N2grams_lc[lc] = true
 		sst.NODE_DIRECTORY.N2_top++
 		return node_alloc_ptr
 	case N3GRAM:
@@ -56,6 +59,7 @@ func AppendTextToDirectory(sst *PoSST,event Node,ErrFunc func(string)) NodePtr {
 		event.NPtr = node_alloc_ptr
 		sst.NODE_DIRECTORY.N3directory = append(sst.NODE_DIRECTORY.N3directory,event)
 		sst.NODE_DIRECTORY.N3grams[event.S] = cnode_slot
+		sst.NODE_DIRECTORY.N3grams_lc[lc] = true
 		sst.NODE_DIRECTORY.N3_top++
 		return node_alloc_ptr
 	case LT128:
@@ -63,6 +67,8 @@ func AppendTextToDirectory(sst *PoSST,event Node,ErrFunc func(string)) NodePtr {
 		node_alloc_ptr.CPtr = cnode_slot
 		event.NPtr = node_alloc_ptr
 		sst.NODE_DIRECTORY.LT128 = append(sst.NODE_DIRECTORY.LT128,event)
+		sst.NODE_DIRECTORY.LT128grams[event.S] = cnode_slot
+		sst.NODE_DIRECTORY.LT128grams_lc[lc] = true
 		sst.NODE_DIRECTORY.LT128_top++
 		return node_alloc_ptr
 	case LT1024:
@@ -70,6 +76,8 @@ func AppendTextToDirectory(sst *PoSST,event Node,ErrFunc func(string)) NodePtr {
 		node_alloc_ptr.CPtr = cnode_slot
 		event.NPtr = node_alloc_ptr
 		sst.NODE_DIRECTORY.LT1024 = append(sst.NODE_DIRECTORY.LT1024,event)
+		sst.NODE_DIRECTORY.LT1024grams[event.S] = cnode_slot
+		sst.NODE_DIRECTORY.LT1024grams_lc[lc] = true
 		sst.NODE_DIRECTORY.LT1024_top++
 		return node_alloc_ptr
 	case GT1024:
@@ -77,6 +85,8 @@ func AppendTextToDirectory(sst *PoSST,event Node,ErrFunc func(string)) NodePtr {
 		node_alloc_ptr.CPtr = cnode_slot
 		event.NPtr = node_alloc_ptr
 		sst.NODE_DIRECTORY.GT1024 = append(sst.NODE_DIRECTORY.GT1024,event)
+		sst.NODE_DIRECTORY.GT1024grams[event.S] = cnode_slot
+		sst.NODE_DIRECTORY.GT1024grams_lc[lc] = true
 		sst.NODE_DIRECTORY.GT1024_top++
 		return node_alloc_ptr
 	}
@@ -100,11 +110,11 @@ func CheckExistingOrAltCaps(sst *PoSST,event Node,ErrFunc func(string)) (Classed
 	case N3GRAM:
 		cnode_slot,ok = sst.NODE_DIRECTORY.N3grams[event.S]
 	case LT128:
-		cnode_slot,ok = LinearFindText(sst.NODE_DIRECTORY.LT128,event,ignore_caps)
+		cnode_slot,ok = sst.NODE_DIRECTORY.LT128grams[event.S]
 	case LT1024:
-		cnode_slot,ok = LinearFindText(sst.NODE_DIRECTORY.LT1024,event,ignore_caps)
+		cnode_slot,ok = sst.NODE_DIRECTORY.LT1024grams[event.S]
 	case GT1024:
-		cnode_slot,ok = LinearFindText(sst.NODE_DIRECTORY.GT1024,event,ignore_caps)
+		cnode_slot,ok = sst.NODE_DIRECTORY.GT1024grams[event.S]
 	}
 
 	if ok {
@@ -113,34 +123,22 @@ func CheckExistingOrAltCaps(sst *PoSST,event Node,ErrFunc func(string)) (Classed
 		// Check for alternative caps
 
 		ignore_caps = true
-		alternative_caps := false
-		
+		_ = ignore_caps
+		var alternative_caps bool
+		lc := strings.ToLower(event.S)
 		switch event.NPtr.Class {
 		case N1GRAM:
-			for key := range sst.NODE_DIRECTORY.N1grams {
-				if strings.ToLower(key) == strings.ToLower(event.S) {
-					alternative_caps = true
-				}
-			}
+			alternative_caps = sst.NODE_DIRECTORY.N1grams_lc[lc]
 		case N2GRAM:
-			for key := range sst.NODE_DIRECTORY.N2grams {
-				if strings.ToLower(key) == strings.ToLower(event.S) {
-					alternative_caps = true
-				}
-			}
+			alternative_caps = sst.NODE_DIRECTORY.N2grams_lc[lc]
 		case N3GRAM:
-			for key := range sst.NODE_DIRECTORY.N3grams {
-				if strings.ToLower(key) == strings.ToLower(event.S) {
-					alternative_caps = true
-				}
-			}
-
+			alternative_caps = sst.NODE_DIRECTORY.N3grams_lc[lc]
 		case LT128:
-			_,alternative_caps = LinearFindText(sst.NODE_DIRECTORY.LT128,event,ignore_caps)
+			alternative_caps = sst.NODE_DIRECTORY.LT128grams_lc[lc]
 		case LT1024:
-			_,alternative_caps = LinearFindText(sst.NODE_DIRECTORY.LT1024,event,ignore_caps)
+			alternative_caps = sst.NODE_DIRECTORY.LT1024grams_lc[lc]
 		case GT1024:
-			_,alternative_caps = LinearFindText(sst.NODE_DIRECTORY.GT1024,event,ignore_caps)
+			alternative_caps = sst.NODE_DIRECTORY.GT1024grams_lc[lc]
 		}
 
 		if alternative_caps {

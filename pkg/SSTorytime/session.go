@@ -179,6 +179,35 @@ func MemoryInit(sst *PoSST) {
 		sst.NODE_DIRECTORY.N3grams = make(map[string]ClassedNodePtr)
 	}
 
+	if sst.NODE_DIRECTORY.LT128grams == nil {
+		sst.NODE_DIRECTORY.LT128grams = make(map[string]ClassedNodePtr)
+	}
+	if sst.NODE_DIRECTORY.LT1024grams == nil {
+		sst.NODE_DIRECTORY.LT1024grams = make(map[string]ClassedNodePtr)
+	}
+	if sst.NODE_DIRECTORY.GT1024grams == nil {
+		sst.NODE_DIRECTORY.GT1024grams = make(map[string]ClassedNodePtr)
+	}
+	// _lc maps: lowercased keys for O(1) alternative-caps detection.
+	if sst.NODE_DIRECTORY.N1grams_lc == nil {
+		sst.NODE_DIRECTORY.N1grams_lc = make(map[string]bool)
+	}
+	if sst.NODE_DIRECTORY.N2grams_lc == nil {
+		sst.NODE_DIRECTORY.N2grams_lc = make(map[string]bool)
+	}
+	if sst.NODE_DIRECTORY.N3grams_lc == nil {
+		sst.NODE_DIRECTORY.N3grams_lc = make(map[string]bool)
+	}
+	if sst.NODE_DIRECTORY.LT128grams_lc == nil {
+		sst.NODE_DIRECTORY.LT128grams_lc = make(map[string]bool)
+	}
+	if sst.NODE_DIRECTORY.LT1024grams_lc == nil {
+		sst.NODE_DIRECTORY.LT1024grams_lc = make(map[string]bool)
+	}
+	if sst.NODE_DIRECTORY.GT1024grams_lc == nil {
+		sst.NODE_DIRECTORY.GT1024grams_lc = make(map[string]bool)
+	}
+
 	sst.NODE_CACHE = make(map[NodePtr]NodePtr)
 	sst.INVERSE_ARROWS = make(map[ArrowPtr]ArrowPtr)
 	sst.ARROW_SHORT_DIR = make(map[string]ArrowPtr)
