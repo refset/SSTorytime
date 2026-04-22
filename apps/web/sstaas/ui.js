@@ -28,8 +28,8 @@ const CONTROLS_HTML = `
     <button id="sstaas-pick-folder" class="sstaas-btn" hidden>Choose Drive folder</button>
     <code id="sstaas-folder" class="sstaas-folder" hidden></code>
     <button id="sstaas-reindex" class="sstaas-btn primary" hidden>Re-index</button>
-    <label for="sstaas-open-local" class="sstaas-btn" title="Open a local .n4l file (test path; does not touch Drive)">Open local .n4l</label>
-    <input id="sstaas-open-local" type="file" accept=".n4l,text/plain" multiple hidden>
+    <label for="sstaas-open-local" class="sstaas-btn" title="Pick a local directory; every .n4l inside is parsed. No Drive required.">Open local n4l directory</label>
+    <input id="sstaas-open-local" type="file" webkitdirectory directory multiple hidden>
     <span id="sstaas-status" class="sstaas-status"></span>
   </div>`;
 
@@ -243,15 +243,31 @@ function setStatus(t) {
 
 async function runOpenLocal(files) {
   if (!isBridgeReadyRef()) { alert("PGlite/WASM still loading."); return; }
-  setStatus(`Reading ${files.length} local file(s)…`);
+  // webkitdirectory hands us everything under the picked folder
+  // (recursively) — filter to *.n4l so we don't try to parse binaries
+  // or dot-files.
+  const n4ls = files.filter((f) => /\.n4l$/i.test(f.name));
+  if (n4ls.length === 0) {
+    setStatus(`No .n4l files found in the picked directory (${files.length} total files).`);
+    return;
+  }
+  setStatus(`Reading ${n4ls.length} .n4l file(s)…`);
   const payload = {};
   try {
-    for (const f of files) payload[f.name] = await f.text();
+    for (const f of n4ls) {
+      // webkitRelativePath is "<dir>/...path/file.n4l"; use it as the
+      // key so two files with the same basename in different subfolders
+      // don't clobber each other.
+      const key = f.webkitRelativePath || f.name;
+      payload[key] = await f.text();
+    }
+    setStatus(`Parsing ${n4ls.length} file(s) — this takes a few seconds per file…`);
     const out = await parseN4L(payload);
-    const summary = out && out.files
-      ? Object.entries(out.files).map(([n, size]) => `${n}=${size}B`).join(", ")
-      : JSON.stringify(out);
-    setStatus(`Parsed: ${summary}${out.note ? ` — ${out.note}` : ""}`);
+    setStatus(
+      `Parsed ${out.parsed?.length ?? 0} file(s). ` +
+      `Nodes: ${out.n1Directory + out.n2Directory + out.n3Directory + out.lt128 + out.lt1024 + out.gt1024}, ` +
+      `arrows: ${out.arrowTotal}.`
+    );
   } catch (err) {
     console.error("open-local failed", err);
     setStatus("Open local failed: " + err.message);
