@@ -18,6 +18,7 @@ import (
 	"embed"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	SST "github.com/markburgess/SSTorytime/pkg/SSTorytime"
@@ -84,20 +85,70 @@ func ParseWithConfigs(sst *SST.PoSST, userConfigs, userFiles map[string]string) 
 	tConfig := time.Now()
 	AddMandatory(sst)
 	CONFIGURING = true
-	for _, name := range configOrder {
-		data, readErr := embeddedConfigs.ReadFile("embeddedconfig/" + name)
-		if readErr != nil {
-			return res, fmt.Errorf("n4lparse: embedded config %q missing: %w", name, readErr)
+
+	// Mirror upstream's N4L CLI: if the caller supplied a SSTconfig/,
+	// use ONLY that — don't mix in the embedded defaults. Otherwise
+	// (most callers) load the embedded defaults. Mixing both means
+	// the first registration of a Long/Short name wins and per-
+	// dataset aliases (e.g. MusicCollection's "release date"
+	// (mreleased) vs embedded's "release date" (reldate)) silently
+	// lose, leaving nodes to fail with "no such arrow".
+	useEmbedded := len(userConfigs) == 0
+	if useEmbedded {
+		for _, name := range configOrder {
+			data, readErr := embeddedConfigs.ReadFile("embeddedconfig/" + name)
+			if readErr != nil {
+				return res, fmt.Errorf("n4lparse: embedded config %q missing: %w", name, readErr)
+			}
+			resetParserState(name)
+			ParseConfig(sst, []rune(string(data)))
 		}
-		resetParserState(name)
-		ParseConfig(sst, []rune(string(data)))
 	}
-	// User-supplied SSTconfig/*.sst, deterministic order.
+	// User-supplied SSTconfig/*.sst. Order matters: arrows before
+	// annotations before closures, exactly like configOrder for the
+	// embedded defaults. If the user's dir names match the upstream
+	// pattern (arrows-*.sst / annotations.sst / closures.sst) we
+	// sort by the same priority, with alphabetical fallback for any
+	// extras.
+	priority := func(base string) int {
+		switch {
+		case strings.HasPrefix(base, "arrows-LT"):
+			return 0
+		case strings.HasPrefix(base, "arrows-NR"):
+			return 1
+		case strings.HasPrefix(base, "arrows-CN"):
+			return 2
+		case strings.HasPrefix(base, "arrows-EP"):
+			return 3
+		case strings.HasPrefix(base, "arrows-"):
+			return 4
+		case base == "annotations.sst":
+			return 5
+		case base == "closures.sst":
+			return 6
+		default:
+			return 7
+		}
+	}
 	configNames := make([]string, 0, len(userConfigs))
 	for n := range userConfigs {
 		configNames = append(configNames, n)
 	}
-	sort.Strings(configNames)
+	sort.Slice(configNames, func(i, j int) bool {
+		bi := configNames[i]
+		if idx := strings.LastIndex(bi, "/"); idx >= 0 {
+			bi = bi[idx+1:]
+		}
+		bj := configNames[j]
+		if idx := strings.LastIndex(bj, "/"); idx >= 0 {
+			bj = bj[idx+1:]
+		}
+		pi, pj := priority(bi), priority(bj)
+		if pi != pj {
+			return pi < pj
+		}
+		return configNames[i] < configNames[j]
+	})
 	for _, name := range configNames {
 		resetParserState(name)
 		ParseConfig(sst, []rune(userConfigs[name]))
