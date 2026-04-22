@@ -19,6 +19,15 @@ func GraphToDB(sst PoSST,wait_counter bool) {
 
 	total := len(sst.NODE_DIRECTORY.N1directory) + len(sst.NODE_DIRECTORY.N2directory) + len(sst.NODE_DIRECTORY.N3directory) + len(sst.NODE_DIRECTORY.LT128) + len(sst.NODE_DIRECTORY.LT1024) + len(sst.NODE_DIRECTORY.GT1024) + len(sst.PAGE_MAP)
 
+	// Node and PageMap tables have no uniqueness constraints, so a
+	// re-run would insert every row again and GetDBNodeByNodePtr
+	// would later panic with "returned too many matches". Upstream
+	// already drops+recreates the arrow tables below for the same
+	// reason; extend the pattern to Node/PageMap so a reindex is
+	// idempotent against the persistent graph.
+	sst.DB.QueryRow("TRUNCATE TABLE Node")
+	sst.DB.QueryRow("TRUNCATE TABLE PageMap")
+
 	fmt.Println("\nStoring primary nodes ...\n")
 
 	for class := N1GRAM; class <= GT1024; class++ {
