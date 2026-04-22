@@ -278,8 +278,8 @@ func jsSearch(this js.Value, args []js.Value) any {
 
 		nptrs := SST.SolveNodePtrs(psst, params.Name, params, nil, maxlimit)
 		if len(nptrs) == 0 {
-			return packageResponse("Error", jsonString(
-				fmt.Sprintf("No nodes match %q.", query))), nil
+			// Empty Orbits rather than Error — see above.
+			return packageResponse("Orbits", "[]"), nil
 		}
 
 		events := make([]SST.NodeEvent, 0, len(nptrs))
