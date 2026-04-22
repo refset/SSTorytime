@@ -70,43 +70,82 @@ Branch base: upstream tip (`b09c915` at fork time).
 ## Status
 
 ### Done in this branch
-- `cmd/wasm/main.go` — minimal Go-WASM entry, async-only bridge.
-- `apps/web/sstaas/` — bootstrap, fetch shim, PGlite + schema, WASM
-  bridge, GIS auth, Drive REST, re-index orchestrator, asset cache,
-  UI injection, legal copy, config.
-- `apps/web/build.sh` — assembles `dist/` from upstream `src/server/public/`
-  + `apps/web/sstaas/`, patches `index.html`, builds `sst.wasm`.
+- `cmd/wasm/main.go` — Go-WASM entry exposing `version()`, `open()`,
+  `nodeCount()`, `parseN4L()` on `window.__sstWasm`. Async via
+  Promise+goroutine.
+- `pkg/SSTorytime/driver_pglite_js.go` — `database/sql` driver that
+  bridges to PGlite via `window.__sstQuery`. Handles bool/int/float
+  scalars; everything else (text, tsvector, composites, arrays) comes
+  through as strings, which matches what `lib/pq` does and what
+  upstream's `ParseSQL*` helpers in `tools.go` already consume.
+  `//go:build js && wasm`; native build untouched.
+- `pkg/SSTorytime/unaccent_wasm.go` — installs an `unaccent(text)` SQL
+  function (NFD + strip combining marks + small translate for
+  non-decomposing letters like ø/ł/ß) so upstream's `sst_unaccent`
+  wrapper resolves on PGlite, which lacks the unaccent extension.
+- `pkg/SSTorytime/session_wasm.go` — `OpenWasm(loadArrows)` mirrors
+  native `Open()` but talks to PGlite via the pglite-js driver,
+  installs the unaccent shim before `Configure()`, and returns errors
+  instead of `os.Exit`. Native `Open()` unchanged.
+- `internal/pgtext` — pure-Go decoder/encoder for Postgres composite
+  literals `(...)` and array literals `{...}`. Standalone, unit
+  tested, used by the driver for any caller that wants to decode a
+  composite/array string into typed values.
+- `apps/web/sstaas/` — bootstrap, fetch shim, PGlite + flat schema,
+  WASM bridge, GIS auth, Drive REST, re-index orchestrator with asset
+  cache, UI injection (3 buttons + footer overlays + assets panel),
+  legal copy, config.
+- `apps/web/build.sh` — assembles `dist/` from upstream
+  `src/server/public/` + `apps/web/sstaas/`, patches `index.html`,
+  builds `sst.wasm`.
 - `.github/workflows/pages.yml` — Go install → build → inject
   `vars.GOOGLE_OAUTH_CLIENT_ID` → upload to Pages.
 - `infra/gcp/main.tf` + README — Drive API enable + manual-step
   checklist for OAuth consent screen and Web Client ID.
-- `.gitignore` excludes `/dist/`, `*.wasm`, and the local config override.
+
+### End-to-end verified (browser, PGlite 0.4.4)
+- WASM loads, Go runtime boots, `__sstWasm` global appears.
+- `__sstWasm.open()` resolves `{ok: true}` after running upstream's
+  `Configure()` against PGlite — that means CREATE TYPE NodePtr / Link /
+  Appointment, CREATE TABLE Node / PageMap / ArrowDirectory /
+  ArrowInverses / LastSeen / ContextDirectory, the dozen CREATE OR
+  REPLACE FUNCTION definitions, and the unaccent shim all execute
+  cleanly via the pglite-js driver.
+- `__sstWasm.nodeCount()` returns `0` (round-trip Go → driver →
+  `window.__sstQuery` → PGlite → back to Go works).
 
 ### Still TODO (the honest list)
-- **WASM N4L parser is a stub.** It only echoes filenames + byte
-  lengths. Porting upstream's parser to actually emit nodes/arrows/links
-  is the biggest piece of remaining work. Two viable shapes:
-    (a) Refactor upstream's parser so it emits a diff (no DB calls
-        from Go) and JS does all inserts. Cleanest for the no-DB-from-Go
-        invariant we've established.
-    (b) Implement a `database/sql` driver in Go that calls into JS
-        (`window.__sstQuery`, already wired) so existing upstream code
-        runs largely unchanged. More ambitious; Postgres composite
-        types (`NodePtr`, `Link[]`) need careful handling.
-- **Search is a placeholder.** The fetch shim's `/searchN4L` handler
-  does a simple `LIKE` lookup on the flat `nodes` table and returns an
-  Orbits-shaped response. Once the parser is wired, real search needs
-  more work — and probably a richer schema.
-- **Schema is intentionally flat.** `nodes`, `arrows`, `links` are
-  plain tables with no composite types. Upstream's `NodePtr`/`Link[]`
-  composites would need either a real pq-style row decoder in our JS
-  bridge or a schema flatten — both viable, decision deferred.
+- **PGlite `idb://` persistence is broken in our environment.** Verified
+  via isolated spike pages: `new PGlite('idb://anything')` never
+  resolves `waitReady`, while `new PGlite()` (in-memory) comes up in
+  ~7s. Currently using in-memory; data wipes on refresh and Re-index
+  rebuilds it from Drive. Revisit once a future PGlite release fixes
+  it, or once we wire OPFS persistence (which needs cross-origin
+  isolation headers GitHub Pages doesn't set today).
+- **WASM N4L parser is still a stub.** `parseN4L()` echoes file
+  metadata; the actual ingest into nodes/arrows/links isn't wired
+  yet. With the driver in place this should now be straightforward —
+  call upstream's parser and let it INSERT through the driver into
+  PGlite.
+- **Search is a placeholder.** The fetch-shim's `/searchN4L` handler
+  does a simple `LIKE` lookup against the flat n4l_files table from
+  the earlier scaffolding. Once the parser is wired, switch the
+  handler to invoke a Go-side dispatcher that uses upstream's
+  `SearchN4L`-style logic against the now-populated tables.
 - **Drive Picker not wired up.** Folder selection is currently
   "paste a folder ID into a `prompt()`". Real Picker needs the
   `picker.googleapis.com` API + a Browser API Key restricted by
   referrer. Terraform stub for the key is in `infra/gcp/main.tf`
   (commented out).
-- **No tests yet.** None for the prior code either.
+- **Insert performance not yet profiled.** Each Go `db.Exec` becomes
+  a Promise round-trip to JS+PGlite (1ms-ish baseline). Upstream's
+  parser does many small inserts; once parsing is wired, we should
+  measure with a real N4L file and decide whether to batch via
+  transactions / multi-row INSERT / `COPY ... FROM STDIN`. Recording
+  here so it doesn't get lost.
+- **No tests for the JS modules.** Go side has `internal/pgtext` test
+  coverage; JS modules are untested. `reindex.js` would be the
+  highest-value target if we add JS tests.
 
 ## Local dev
 
