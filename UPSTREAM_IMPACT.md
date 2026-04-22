@@ -13,6 +13,20 @@ JS, CSS, schema, or N4L logic was modified.
 
 ## Committed source edits to upstream files
 
+### `pkg/SSTorytime/*.go` — `os.Exit` → `panic` (29 sites across 10 files)
+
+Every `os.Exit(-1)` / `os.Exit(1)` in the committed upstream Go
+sources becomes a `panic(...)`. This is required for the WASM build
+(so `pkg/n4lparse.Parse`'s `defer recover()` can actually catch a
+fatal parse error — `recover()` does not catch `os.Exit`, which was
+tearing down the whole Go runtime on the first malformed line),
+and it is arguably a strict improvement for the native HTTP server
+too: a malformed request now panics up through `net/http`'s
+per-request recover instead of killing the process. Nine files lose
+their now-unused `"os"` import as a consequence; `session.go` keeps
+it for `os.Getenv` / `os.UserHomeDir`. No behaviour change beyond
+the exit vs. panic semantics.
+
 ### `pkg/SSTorytime/db_upload.go` — one nil-guard
 
 Function: `UploadPageMapEvent`.
