@@ -1,0 +1,63 @@
+# Build the WASM module + assemble the SPA dist/, then publish to
+# GitHub Pages. The OAuth client ID is injected from a repo *variable*
+# (not a secret — the client ID is public, but kept out of git so
+# forks can use their own).
+#
+# Repo settings → Variables → New variable:
+#   GOOGLE_OAUTH_CLIENT_ID = 1234567890-xxx.apps.googleusercontent.com
+#
+# Pages → Source: GitHub Actions
+
+name: Deploy SPA to GitHub Pages
+
+on:
+  push:
+    branches: [client-side-drive]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Build dist/
+        run: sh apps/web/build.sh
+
+      - name: Inject OAuth client ID
+        env:
+          OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+        run: |
+          if [ -z "$OAUTH_CLIENT_ID" ]; then
+            echo "::warning::GOOGLE_OAUTH_CLIENT_ID variable not set; sign-in won't work."
+          else
+            sed -i "s|REPLACE_WITH_OAUTH_CLIENT_ID.apps.googleusercontent.com|$OAUTH_CLIENT_ID|g" \
+              dist/sstaas/config.js
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

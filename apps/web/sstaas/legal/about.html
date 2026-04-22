@@ -1,0 +1,29 @@
+<h1>About</h1>
+<p>
+  A static-site, browser-only viewer for
+  <a href="https://github.com/markburgess/SSTorytime" rel="noopener">SSTorytime</a>.
+  All design and ideas are by Mark Burgess; this UI is an alternative
+  delivery mode that runs the same N4L parser in WebAssembly and stores
+  the parsed graph in your browser via PGlite.
+</p>
+<h2>How it works</h2>
+<ol>
+  <li>You sign in with Google and pick a folder in your Drive.</li>
+  <li>The app reads <code>.n4l</code> files and other assets from that folder.</li>
+  <li>The N4L parser, compiled to WebAssembly, runs in your browser tab.</li>
+  <li>An in-browser Postgres (PGlite, also WASM) stores parsed data in IndexedDB.</li>
+  <li>A <code>.sstaas-index.json</code> file in your Drive folder tracks what's been
+      indexed and what's archived.</li>
+  <li>Pressing <strong>Re-index</strong> diffs the folder against that meta and
+      processes anything new or changed.</li>
+</ol>
+<h2>What runs where</h2>
+<ul>
+  <li><strong>The hosting domain</strong> serves only static files. No server-side
+      application logic, no database, no logs of your activity beyond whatever
+      the static host records.</li>
+  <li><strong>Your browser</strong> holds the parsed graph (IndexedDB via PGlite)
+      and the OAuth access token (in memory only).</li>
+  <li><strong>Google Drive</strong> holds the canonical N4L and asset files.
+      Drive is the source of truth; the in-browser DB is a derived index.</li>
+</ul>

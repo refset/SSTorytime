@@ -1,0 +1,64 @@
+// WASM bridge. Loads sst.wasm on the main thread (no Worker needed —
+// Go calls back into JS via Promises, so PGlite's async API and Go's
+// goroutine-await pattern coexist on a single event loop).
+//
+// Exposes:
+//   - initWasm(): loads + starts the Go runtime
+//   - parseN4L(filesObj): forwards to __sstWasm.parseN4L(...)
+//   - registers window.__sstQuery so Go (when wired) can run SQL.
+
+import { query as dbQuery } from "./db.js";
+
+let wasmStarted = false;
+
+export async function initWasm() {
+  if (wasmStarted) return;
+
+  // Allow Go to call PGlite via this global. Returns a Promise.
+  // (The current parser stub doesn't use this yet; the hook is in
+  // place for when N4L parsing actually runs in Go.)
+  window.__sstQuery = async (sql, paramsJSON) => {
+    let params = [];
+    if (paramsJSON && paramsJSON !== "[]") {
+      try { params = JSON.parse(paramsJSON); }
+      catch (e) { throw new Error("__sstQuery: bad params JSON"); }
+    }
+    try { return await dbQuery(sql, params); }
+    catch (e) { return { error: String(e?.message ?? e) }; }
+  };
+
+  // Load the Go runtime and the WASM module.
+  await ensureGoRuntime();
+  const go = new window.Go();
+  const result = await WebAssembly.instantiateStreaming(fetch("/sstaas/sst.wasm"), go.importObject);
+  go.run(result.instance); // do NOT await — main() blocks forever by design
+
+  // Wait for Go's main() to publish __sstWasm.
+  for (let i = 0; i < 200 && !window.__sstWasm; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  if (!window.__sstWasm) throw new Error("WASM loaded but __sstWasm never appeared");
+  wasmStarted = true;
+}
+
+function ensureGoRuntime() {
+  if (window.Go) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "/sstaas/wasm_exec.js";
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("failed to load wasm_exec.js"));
+    document.head.appendChild(s);
+  });
+}
+
+export async function parseN4L(filesObj) {
+  if (!window.__sstWasm) throw new Error("WASM not initialized");
+  const out = await window.__sstWasm.parseN4L(filesObj);
+  // out is a JSON string per cmd/wasm/main.go
+  return typeof out === "string" ? JSON.parse(out) : out;
+}
+
+export function wasmVersion() {
+  return window.__sstWasm?.version() ?? "(not loaded)";
+}

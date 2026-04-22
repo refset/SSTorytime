@@ -91,3 +91,8 @@ conceptualize
 # mkdocs build output
 /pages/site/
 /site/
+
+# client-side-drive build outputs
+/dist/
+*.wasm
+apps/web/sstaas/config.local.js

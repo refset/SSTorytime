@@ -1,0 +1,43 @@
+<h1>Privacy</h1>
+<p><em>Version 2026-04-22</em></p>
+
+<h2>Summary</h2>
+<p>
+  This application is delivered as static files from a content host
+  (e.g. GitHub Pages). All application logic runs in your browser. The
+  maintainers do not operate any backend service that processes or
+  stores your data.
+</p>
+
+<h2>What data is collected</h2>
+<ul>
+  <li><strong>By this application:</strong> none. No analytics, no
+      telemetry, no remote logging.</li>
+  <li><strong>By the static host:</strong> standard web request metadata
+      (IP, user agent, requested path) per the host's policy. The
+      maintainers don't access those logs.</li>
+  <li><strong>By Google:</strong> when you sign in and grant Drive
+      access, Google records that activity per their own privacy policy.
+      The OAuth scope used is
+      <code>https://www.googleapis.com/auth/drive.file</code>, which
+      restricts the app to files you explicitly open or create through it.</li>
+</ul>
+
+<h2>Where your data lives</h2>
+<ul>
+  <li><strong>Source N4L and asset files:</strong> in your Google Drive
+      folder.</li>
+  <li><strong>Parsed graph:</strong> in your browser, in IndexedDB via
+      PGlite. It's derived data — clearing browser storage is safe;
+      press <em>Re-index</em> to rebuild.</li>
+  <li><strong>OAuth access token:</strong> in memory only, cleared on refresh.</li>
+</ul>
+
+<h2>What the application can see</h2>
+<p>
+  Only files within the Drive folder you pick, and only while you're
+  signed in. The app cannot see files in other folders. Revoke access
+  at any time from your
+  <a href="https://myaccount.google.com/permissions" rel="noopener">Google
+  account permissions page</a>.
+</p>
