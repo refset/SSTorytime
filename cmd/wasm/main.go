@@ -25,9 +25,10 @@ import (
 	"syscall/js"
 
 	SST "github.com/markburgess/SSTorytime/pkg/SSTorytime"
+	"github.com/markburgess/SSTorytime/pkg/n4lparse"
 )
 
-const buildVersion = "client-side-drive/wasm 0.0.2"
+const buildVersion = "client-side-drive/wasm 0.0.3"
 
 var (
 	openOnce sync.Once
@@ -84,8 +85,10 @@ func jsNodeCount(this js.Value, args []js.Value) any {
 	})
 }
 
-// jsParseN4L: parser stub — echoes file metadata for now. The real
-// upstream parser will be wired through here next.
+// jsParseN4L runs the upstream N4L parser over a {filename: text}
+// payload and flushes the resulting in-memory graph into PGlite via
+// GraphToDB. Returns a JSON string summarizing what was parsed + the
+// updated directory sizes.
 func jsParseN4L(this js.Value, args []js.Value) any {
 	return promise(func() (any, error) {
 		if err := ensureOpen(); err != nil {
@@ -98,7 +101,8 @@ func jsParseN4L(this js.Value, args []js.Value) any {
 		if filesArg.Type() != js.TypeObject {
 			return nil, fmt.Errorf("parseN4L: argument must be a {filename: text} object")
 		}
-		files := map[string]int{}
+		files := map[string]string{}
+		sizes := map[string]int{}
 		keys := js.Global().Get("Object").Call("keys", filesArg)
 		for i := 0; i < keys.Length(); i++ {
 			name := keys.Index(i).String()
@@ -106,12 +110,29 @@ func jsParseN4L(this js.Value, args []js.Value) any {
 			if v.Type() != js.TypeString {
 				return nil, fmt.Errorf("parseN4L: value for %q must be a string", name)
 			}
-			files[name] = v.Length()
+			text := v.String()
+			files[name] = text
+			sizes[name] = len(text)
 		}
+
+		res, err := n4lparse.Parse(&psst, files)
+		if err != nil {
+			return nil, fmt.Errorf("parseN4L: %w", err)
+		}
+
+		SST.GraphToDB(psst, false)
+
 		out := map[string]any{
-			"ok":    true,
-			"note":  "parser stub: real N4L ingest not yet wired through",
-			"files": files,
+			"ok":          true,
+			"files":       sizes,
+			"parsed":      res.Files,
+			"n1Directory": res.N1Directory,
+			"n2Directory": res.N2Directory,
+			"n3Directory": res.N3Directory,
+			"lt128":       res.LT128,
+			"lt1024":      res.LT1024,
+			"gt1024":      res.GT1024,
+			"arrowTotal":  res.ArrowTotal,
 		}
 		b, _ := json.Marshal(out)
 		return js.ValueOf(string(b)), nil
