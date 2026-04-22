@@ -113,8 +113,20 @@ Branch base: upstream tip (`b09c915` at fork time).
   cleanly via the pglite-js driver.
 - `__sstWasm.nodeCount()` returns `0` (round-trip Go → driver →
   `window.__sstQuery` → PGlite → back to Go works).
+- **Real N4L parsing + GraphToDB.** The "Open local .n4l" button in
+  the controls bar feeds a local file into `__sstWasm.parseN4L`, which
+  runs `pkg/n4lparse.Parse` (the extracted upstream parser) and then
+  `SST.GraphToDB`. Verified against `examples/branches.n4l`: 14 nodes
+  land in Node, PageMap has one row per annotated source line, and
+  `SELECT S, Chap FROM Node ORDER BY S` returns the expected phrases.
 
 ### Still TODO (the honest list)
+- **Search is a placeholder.** The fetch-shim's `/searchN4L` handler
+  does a simple `LIKE` lookup against the flat n4l_files table from
+  the earlier scaffolding. Now that nodes/arrows/links are in the
+  upstream schema, switch the handler to invoke a Go-side dispatcher
+  that uses upstream's `SearchN4L`-style logic against the populated
+  Node / PageMap / ArrowDirectory tables.
 - **PGlite `idb://` persistence is broken in our environment.** Verified
   via isolated spike pages: `new PGlite('idb://anything')` never
   resolves `waitReady`, while `new PGlite()` (in-memory) comes up in
@@ -122,30 +134,28 @@ Branch base: upstream tip (`b09c915` at fork time).
   rebuilds it from Drive. Revisit once a future PGlite release fixes
   it, or once we wire OPFS persistence (which needs cross-origin
   isolation headers GitHub Pages doesn't set today).
-- **WASM N4L parser is still a stub.** `parseN4L()` echoes file
-  metadata; the actual ingest into nodes/arrows/links isn't wired
-  yet. With the driver in place this should now be straightforward —
-  call upstream's parser and let it INSERT through the driver into
-  PGlite.
-- **Search is a placeholder.** The fetch-shim's `/searchN4L` handler
-  does a simple `LIKE` lookup against the flat n4l_files table from
-  the earlier scaffolding. Once the parser is wired, switch the
-  handler to invoke a Go-side dispatcher that uses upstream's
-  `SearchN4L`-style logic against the now-populated tables.
 - **Drive Picker not wired up.** Folder selection is currently
   "paste a folder ID into a `prompt()`". Real Picker needs the
   `picker.googleapis.com` API + a Browser API Key restricted by
   referrer. Terraform stub for the key is in `infra/gcp/main.tf`
   (commented out).
-- **Insert performance not yet profiled.** Each Go `db.Exec` becomes
-  a Promise round-trip to JS+PGlite (1ms-ish baseline). Upstream's
-  parser does many small inserts; once parsing is wired, we should
-  measure with a real N4L file and decide whether to batch via
-  transactions / multi-row INSERT / `COPY ... FROM STDIN`. Recording
-  here so it doesn't get lost.
-- **No tests for the JS modules.** Go side has `internal/pgtext` test
-  coverage; JS modules are untested. `reindex.js` would be the
-  highest-value target if we add JS tests.
+- **Insert performance: ~14s for the 15-line `branches.n4l` sample.**
+  Dominated by the one-Promise-per-statement round-trip (Configure
+  bootstrapping + ~628 arrows from SSTconfig + per-node inserts). The
+  JS/Go bridge adds ~1ms per call and upstream emits a BEGIN;...
+  COMMIT; batch per node, so each node is already one round-trip. Next
+  levers worth measuring: (a) bigger multi-node batches, (b) cache
+  Configure + arrow upload across sessions once idb:// works, (c)
+  COPY-style bulk load for the arrow directory.
+- **No tests for the JS modules.** Go side has `internal/pgtext` and
+  `pkg/n4lparse/embeddedconfig_drift_test.go` coverage; JS modules are
+  untested. `reindex.js` and `db.js`' looksMultiStatement would be the
+  highest-value targets if we add JS tests.
+- **Reindex uses the real parser now but the n4l_files flat-schema
+  row-per-file remnant is still there.** With the upstream schema in
+  use we can delete the `n4l_files` / `nodes` / `arrows` / `links`
+  flat tables in `db.js` SCHEMA_SQL once the fetch-shim's `/searchN4L`
+  handler stops depending on them.
 
 ## Local dev
 
