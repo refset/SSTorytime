@@ -27,43 +27,20 @@ func GraphToDB(sst PoSST,wait_counter bool) {
 
 		switch class {
 		case N1GRAM:
-			for n := offset; n < len(sst.NODE_DIRECTORY.N1directory); n++ {
-				org := sst.NODE_DIRECTORY.N1directory[n]
-				UploadNodeToDB(&sst,org)
-				Waiting(wait_counter,total)
-			}
+			uploadNodesBatch(&sst, sst.NODE_DIRECTORY.N1directory[offset:])
 		case N2GRAM:
-			for n := offset; n < len(sst.NODE_DIRECTORY.N2directory); n++ {
-				org := sst.NODE_DIRECTORY.N2directory[n]
-				UploadNodeToDB(&sst,org)
-				Waiting(wait_counter,total)
-			}
+			uploadNodesBatch(&sst, sst.NODE_DIRECTORY.N2directory[offset:])
 		case N3GRAM:
-			for n := offset; n < len(sst.NODE_DIRECTORY.N3directory); n++ {
-				org := sst.NODE_DIRECTORY.N3directory[n]
-				UploadNodeToDB(&sst,org)
-				Waiting(wait_counter,total)
-			}
+			uploadNodesBatch(&sst, sst.NODE_DIRECTORY.N3directory[offset:])
 		case LT128:
-			for n := offset; n < len(sst.NODE_DIRECTORY.LT128); n++ {
-				org := sst.NODE_DIRECTORY.LT128[n]
-				UploadNodeToDB(&sst,org)
-				Waiting(wait_counter,total)
-			}
+			uploadNodesBatch(&sst, sst.NODE_DIRECTORY.LT128[offset:])
 		case LT1024:
-			for n := offset; n < len(sst.NODE_DIRECTORY.LT1024); n++ {
-				org := sst.NODE_DIRECTORY.LT1024[n]
-				UploadNodeToDB(&sst,org)
-				Waiting(wait_counter,total)
-			}
-
+			uploadNodesBatch(&sst, sst.NODE_DIRECTORY.LT1024[offset:])
 		case GT1024:
-			for n := offset; n < len(sst.NODE_DIRECTORY.GT1024); n++ {
-				org := sst.NODE_DIRECTORY.GT1024[n]
-				UploadNodeToDB(&sst,org)
-				Waiting(wait_counter,total)
-			}
+			uploadNodesBatch(&sst, sst.NODE_DIRECTORY.GT1024[offset:])
 		}
+		_ = total
+		_ = wait_counter
 	}
 
 	// Arrows etc
@@ -94,10 +71,7 @@ func GraphToDB(sst PoSST,wait_counter bool) {
 
 	fmt.Println("Storing page map...")
 
-	for line := 0; line < len(sst.PAGE_MAP); line ++ {
-		UploadPageMapEvent(sst,sst.PAGE_MAP[line])
-		Waiting(wait_counter,total)
-	}
+	uploadPageMapBatch(sst, sst.PAGE_MAP)
 
 	// CREATE INDICES
 
@@ -121,24 +95,13 @@ func GraphToDB(sst PoSST,wait_counter bool) {
 
 func UploadNodeToDB(sst *PoSST, org Node) {
 
-	const nolink = 999
-
-	qstr := "BEGIN;\n" + FormDBNode(sst,org)
-
-	for stindex := 0; stindex < len(org.I); stindex++ {
-
-		lnkarray := FormatSQLLinkArray(org.I[stindex])
-		sttype := STIndexToSTType(stindex)
-		qstr += AppendDBLinkArrayToNode(sst,org.NPtr,lnkarray,sttype)
-	}
-
-	qstr += "\nCOMMIT;"
+	qstr := "BEGIN;\n" + nodeUploadBody(sst, org) + "COMMIT;"
 
 	row,err := sst.DB.Query(qstr)
 
 	if err != nil {
 		s := fmt.Sprint("Failed to insert",err)
-		
+
 		if strings.Contains(s,"duplicate key") {
 		} else {
 			fmt.Println(s,"FAILED \n",qstr,err)
@@ -147,6 +110,87 @@ func UploadNodeToDB(sst *PoSST, org Node) {
 	}
 
 	row.Close()
+}
+
+// nodeUploadBody returns the INSERT/UPDATE block for a single node
+// *without* the wrapping BEGIN/COMMIT so callers can pack many into
+// one transaction.
+func nodeUploadBody(sst *PoSST, org Node) string {
+	body := FormDBNode(sst, org)
+	for stindex := 0; stindex < len(org.I); stindex++ {
+		lnkarray := FormatSQLLinkArray(org.I[stindex])
+		sttype := STIndexToSTType(stindex)
+		body += AppendDBLinkArrayToNode(sst, org.NPtr, lnkarray, sttype)
+	}
+	body += "\n"
+	return body
+}
+
+// uploadNodesBatch wraps up to chunkSize node bodies into one
+// BEGIN…COMMIT. Collapses N round-trips to ceil(N/chunkSize) at the
+// cost of longer SQL strings.
+func uploadNodesBatch(sst *PoSST, nodes []Node) {
+	// 50 nodes per round-trip is the sweet spot in practice. PGlite's
+	// SQL parser/planner is roughly super-linear in statement-count
+	// per batch — larger chunks (tried 200) send individual batch
+	// execution past 15 s on medium files. 50 keeps each batch under
+	// ~50KB of SQL so the executor stays in its fast path.
+	const chunkSize = 50
+	for i := 0; i < len(nodes); i += chunkSize {
+		end := i + chunkSize
+		if end > len(nodes) {
+			end = len(nodes)
+		}
+		var b strings.Builder
+		b.WriteString("BEGIN;\n")
+		for j := i; j < end; j++ {
+			b.WriteString(nodeUploadBody(sst, nodes[j]))
+		}
+		b.WriteString("COMMIT;")
+		row, err := sst.DB.Query(b.String())
+		if err != nil {
+			s := fmt.Sprint("Failed to insert node batch", err)
+			if !strings.Contains(s, "duplicate key") {
+				fmt.Println(s, "FAILED batch of", end-i)
+			}
+			continue
+		}
+		row.Close()
+	}
+}
+
+// pageMapBody mirrors UploadPageMapEvent without BEGIN/COMMIT.
+func pageMapBody(line PageMap) string {
+	chap := SQLEscape(line.Chapter)
+	lnkarray := FormatSQLLinkArray(line.Path)
+	return fmt.Sprintf("INSERT INTO PageMap (Chap,Alias,Ctx,Line) VALUES ('%s','%s',%d,%d);\n"+
+		"UPDATE PageMap SET Path='%s' WHERE Chap = '%s' AND Line = '%d';\n",
+		chap, line.Alias, line.Context, line.Line, lnkarray, chap, line.Line)
+}
+
+func uploadPageMapBatch(sst PoSST, lines []PageMap) {
+	const chunkSize = 200
+	for i := 0; i < len(lines); i += chunkSize {
+		end := i + chunkSize
+		if end > len(lines) {
+			end = len(lines)
+		}
+		var b strings.Builder
+		b.WriteString("BEGIN;\n")
+		for j := i; j < end; j++ {
+			b.WriteString(pageMapBody(lines[j]))
+		}
+		b.WriteString("COMMIT;")
+		row, err := sst.DB.Query(b.String())
+		if err != nil {
+			s := fmt.Sprint("Failed to insert pagemap batch", err)
+			if !strings.Contains(s, "duplicate key") {
+				fmt.Println(s, "FAILED batch of", end-i)
+			}
+			continue
+		}
+		row.Close()
+	}
 }
 
 // **************************************************************************
