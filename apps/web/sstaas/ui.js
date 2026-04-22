@@ -41,7 +41,6 @@ const CONTROLS_HTML = `
       <span id="sstaas-local-dot" class="sstaas-dot" title=""></span>
       <code id="sstaas-local-name" class="sstaas-folder"></code>
       <button id="sstaas-local-refresh" class="sstaas-icon-btn" title="Refresh: rescan folder + re-parse">⟳</button>
-      <button id="sstaas-local-clear"   class="sstaas-icon-btn" title="Clear this folder binding (pick another)">×</button>
     </span>
 
     <span id="sstaas-status" class="sstaas-status"></span>
@@ -246,7 +245,6 @@ export async function injectUI({ isBridgeReady } = {}) {
     if (files.length) onLocalFallback(files);
   });
   document.getElementById("sstaas-local-refresh").addEventListener("click", onLocalRefresh);
-  document.getElementById("sstaas-local-clear").addEventListener("click", onLocalClear);
 
   onAuthChange(refresh);
   refresh();
@@ -359,13 +357,6 @@ async function onLocalRefresh() {
     // fresh pick — the File objects we captured are static.
     await parseFromFiles(localState.files);
   }
-}
-
-async function onLocalClear() {
-  await fh.clear(getSessionId()).catch(() => {});
-  localState = null;
-  showLocalRow(false);
-  setStatus("");
 }
 
 async function restoreLocalFolder() {

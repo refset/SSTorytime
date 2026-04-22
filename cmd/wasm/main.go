@@ -23,6 +23,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"syscall/js"
 
@@ -30,7 +31,7 @@ import (
 	"github.com/markburgess/SSTorytime/pkg/n4lparse"
 )
 
-const buildVersion = "client-side-drive/wasm 0.0.4"
+const buildVersion = "client-side-drive/wasm 0.0.5"
 
 var (
 	openOnce sync.Once
@@ -142,15 +143,21 @@ func jsParseN4L(this js.Value, args []js.Value) any {
 	})
 }
 
-// jsSearch mirrors src/server/http_server.go's /searchN4L handler but
-// only for the common HandleOrbit case (name-based search). Advanced
-// queries (\\path, \\from/\\to, \\stats, \\page, arrows, sequence)
-// still come back as a "not-yet-ported" Error response so the UI can
-// surface something the user can read.
+// jsSearch mirrors src/server/http_server.go's /searchN4L handler.
+// Dispatches to: Orbits (name search), TOC (chapter/context listing),
+// or Error (unsupported query types: \path, \from/\to, \stats, \page,
+// arrows, sequence).
 //
 // Returns a JSON string shaped exactly like upstream's PackageResponse:
-//   { "Response": "Orbits"|"Error", "Content": <JSON string>,
+//   { "Response": "Orbits"|"TOC"|"Error", "Content": <json value>,
 //     "Time": "...", "Intent": {...}, "Ambient": {...} }
+//
+// IMPORTANT: upstream main.js's FetchPage (initial page load) calls
+// DoOrbitPanel unconditionally on whatever Response comes back, and
+// DoOrbitPanel crashes on a string Content because it iterates it as
+// an array. So when the query is empty we return an empty Orbits
+// response (Content=[]) instead of Error — DoOrbitPanel handles that
+// cleanly with a "No result" message.
 func jsSearch(this js.Value, args []js.Value) any {
 	return promise(func() (any, error) {
 		if err := ensureOpen(); err != nil {
@@ -171,9 +178,21 @@ func jsSearch(this js.Value, args []js.Value) any {
 		name := len(params.Name) > 0
 		from := len(params.From) > 0
 		to := len(params.To) > 0
+		chapter := params.Chapter != ""
+		context := len(params.Context) > 0
 
-		// Anything we don't yet support: return an explanatory Error
-		// body so the UI renders a message rather than blank results.
+		// Empty query (e.g. initial page load's FetchPage): return an
+		// empty Orbits response so DoOrbitPanel renders "No result"
+		// safely. Error responses with a non-empty Content string
+		// would crash DoOrbitPanel — see comment above.
+		if !name && !from && !to && !chapter && !context &&
+			!params.Stats && !params.Sequence && params.PageNr == 0 {
+			return packageResponse("Orbits", "[]"), nil
+		}
+
+		// Unsupported-for-now queries still return Error; upstream
+		// sendLinkSearch (search-box flow) handles Error cleanly
+		// (just logs), and these never come in via FetchPage.
 		var unsupported string
 		switch {
 		case params.Stats:
@@ -184,11 +203,18 @@ func jsSearch(this js.Value, args []js.Value) any {
 			unsupported = "\\page lookups not yet wired."
 		case from || to:
 			unsupported = "\\from / \\to path queries not yet wired."
-		case !name:
-			unsupported = "(empty query — type a node name or phrase)"
 		}
 		if unsupported != "" {
 			return packageResponse("Error", jsonString(unsupported)), nil
+		}
+
+		// Chapter/context listing (\toc, \chapter, \in, etc.) →
+		// TOC response with a minimal ChCtx list. We don't yet
+		// compute the per-chapter context clusters upstream shows,
+		// just the chapter names + coordinates so the user can
+		// see what's in the graph and click through.
+		if (chapter || context) && !name {
+			return buildTOCResponse(params, maxlimit), nil
 		}
 
 		nptrs := SST.SolveNodePtrs(psst, params.Name, params, nil, maxlimit)
@@ -214,6 +240,31 @@ func jsSearch(this js.Value, args []js.Value) any {
 	})
 }
 
+// buildTOCResponse: minimal equivalent of upstream's ShowChapterContexts.
+// Lists the chapters in the graph with their layout coordinates, leaving
+// the per-chapter context-cluster fields empty for now (upstream's
+// IntersectContextParts / ContextIntentAnalysis aren't cheap and we
+// haven't ported the helpers into pkg/SSTorytime yet).
+func buildTOCResponse(params SST.SearchParameters, limit int) any {
+	toc := SST.GetChaptersByChapContext(psst, params.Chapter, params.Context, limit)
+	chapList := make([]string, 0, len(toc))
+	for c := range toc {
+		chapList = append(chapList, c)
+	}
+	sort.Strings(chapList)
+
+	chapters := make([]SST.ChCtx, 0, len(chapList))
+	for i, name := range chapList {
+		chapters = append(chapters, SST.ChCtx{
+			Chapter: name,
+			XYZ:     SST.AssignChapterCoordinates(i, len(chapList)),
+		})
+	}
+
+	data, _ := json.Marshal(chapters)
+	return packageResponse("TOC", string(data))
+}
+
 // packageResponse builds the Response envelope upstream's UI expects.
 // Intent + Ambient are left empty — the WASM build doesn't track STM
 // context the way the long-lived Go server does.
@@ -222,12 +273,16 @@ func jsSearch(this js.Value, args []js.Value) any {
 // envelope (Content[0] works in main.js), not as a JSON-encoded
 // string. Use json.RawMessage so Marshal doesn't double-encode it.
 func packageResponse(kind string, contentJSON string) any {
+	// Intent + Ambient are strings on upstream (GetTimeContext /
+	// UpdateSTMContext return string) — main.js does
+	// `el.textContent = obj.Ambient`, so objects render as
+	// "[object Object]". Keep them as empty strings.
 	env := map[string]any{
 		"Response": kind,
 		"Content":  json.RawMessage(contentJSON),
 		"Time":     "",
-		"Intent":   map[string]any{},
-		"Ambient":  map[string]any{},
+		"Intent":   "",
+		"Ambient":  "",
 	}
 	b, _ := json.Marshal(env)
 	return js.ValueOf(string(b))

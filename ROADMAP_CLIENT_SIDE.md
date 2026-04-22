@@ -106,56 +106,100 @@ Branch base: upstream tip (`b09c915` at fork time).
 ### End-to-end verified (browser, PGlite 0.4.4)
 - WASM loads, Go runtime boots, `__sstWasm` global appears.
 - `__sstWasm.open()` resolves `{ok: true}` after running upstream's
-  `Configure()` against PGlite — that means CREATE TYPE NodePtr / Link /
+  `Configure()` against PGlite — CREATE TYPE NodePtr / Link /
   Appointment, CREATE TABLE Node / PageMap / ArrowDirectory /
   ArrowInverses / LastSeen / ContextDirectory, the dozen CREATE OR
   REPLACE FUNCTION definitions, and the unaccent shim all execute
   cleanly via the pglite-js driver.
-- `__sstWasm.nodeCount()` returns `0` (round-trip Go → driver →
-  `window.__sstQuery` → PGlite → back to Go works).
-- **Real N4L parsing + GraphToDB.** The "Open local .n4l" button in
-  the controls bar feeds a local file into `__sstWasm.parseN4L`, which
-  runs `pkg/n4lparse.Parse` (the extracted upstream parser) and then
-  `SST.GraphToDB`. Verified against `examples/branches.n4l`: 14 nodes
-  land in Node, PageMap has one row per annotated source line, and
-  `SELECT S, Chap FROM Node ORDER BY S` returns the expected phrases.
+- **Real N4L parsing + GraphToDB.** Directory picker (File System
+  Access API, fallback to `<input webkitdirectory>`) feeds every
+  `.n4l` in the chosen folder into `__sstWasm.parseN4L`, which runs
+  `pkg/n4lparse.Parse` and then `SST.GraphToDB`. Verified against
+  `examples/branches.n4l`: 14 nodes, 628 arrows, 8 PageMap entries.
+- **Session identity in URL.** `?session=<id>` generated on first
+  load; same URL across tabs binds the same local folder, different
+  URLs are fully independent. Folder handle is persisted in an
+  IndexedDB (`sstaas-folders`) keyed by session id; idb-open is
+  timeout-capped so a hung DB never freezes the UI.
+- **Folder status + change detection.** Dot goes green after a clean
+  parse, flips yellow on a 30s poll whenever the fingerprint of
+  `.n4l` files in the folder (name + size + lastModified) changes on
+  disk, red on permission denied. ⟳ rescans + re-parses.
+- **Search wired to the real schema.** `/searchN4L` delegates to
+  `__sstWasm.search`, which mirrors upstream's HandleSearch:
+  `DecodeSearchField → SolveNodePtrs → GetNodeOrbit → JSONNodeEvent →
+  PackageResponse`. Envelope uses `json.RawMessage` for Content so
+  upstream main.js's `obj.Content[0].Text` works. Initial empty-query
+  FetchPage gets an empty Orbits response (Content=[]) to avoid
+  DoOrbitPanel's string-iteration crash on Error-shaped payloads.
+  A minimal `\toc` / chapter-only query returns a TOC response with
+  chapter names + XYZ (no per-chapter context clusters yet).
+- **Loading splash.** Full-viewport overlay with pulsing dots hides
+  the SPA until PGlite + WASM + OpenWasm are ready. Messages step
+  through phases; sticks red on bootstrap failure.
 
 ### Still TODO (the honest list)
-- **Search is a placeholder.** The fetch-shim's `/searchN4L` handler
-  does a simple `LIKE` lookup against the flat n4l_files table from
-  the earlier scaffolding. Now that nodes/arrows/links are in the
-  upstream schema, switch the handler to invoke a Go-side dispatcher
-  that uses upstream's `SearchN4L`-style logic against the populated
-  Node / PageMap / ArrowDirectory tables.
-- **PGlite `idb://` persistence is broken in our environment.** Verified
-  via isolated spike pages: `new PGlite('idb://anything')` never
-  resolves `waitReady`, while `new PGlite()` (in-memory) comes up in
-  ~7s. Currently using in-memory; data wipes on refresh and Re-index
-  rebuilds it from Drive. Revisit once a future PGlite release fixes
-  it, or once we wire OPFS persistence (which needs cross-origin
-  isolation headers GitHub Pages doesn't set today).
-- **Drive Picker not wired up.** Folder selection is currently
-  "paste a folder ID into a `prompt()`". Real Picker needs the
-  `picker.googleapis.com` API + a Browser API Key restricted by
-  referrer. Terraform stub for the key is in `infra/gcp/main.tf`
-  (commented out).
-- **Insert performance: ~14s for the 15-line `branches.n4l` sample.**
-  Dominated by the one-Promise-per-statement round-trip (Configure
-  bootstrapping + ~628 arrows from SSTconfig + per-node inserts). The
-  JS/Go bridge adds ~1ms per call and upstream emits a BEGIN;...
-  COMMIT; batch per node, so each node is already one round-trip. Next
-  levers worth measuring: (a) bigger multi-node batches, (b) cache
-  Configure + arrow upload across sessions once idb:// works, (c)
-  COPY-style bulk load for the arrow directory.
+
+#### Search features not yet ported from upstream HandleSearch
+
+Currently wired: Orbits (name search), minimal TOC, and explanatory
+"not yet wired" errors for the rest. The gaps:
+
+- **`\stories` / `\sequence`** (`HandleStories`) — traverses `then`/
+  sequence arrows to reconstruct narratives. Lightest of the
+  unwired branches.
+- **`\from X \to Y`** (`HandlePathSolve`) — paths between two node
+  sets, with betweenness centrality + SuperNodes analysis. Pulls in
+  `GetPathsAndSymmetries`, `BetweenNessCentrality`, `SuperNodes`.
+- **`\from X` or `\to X` alone** (`HandleCausalCones`) — forward/
+  backward causal cones. Needs `PackageConeFromOrigin`.
+- **`\stats`** (`ShowStats`) — summary numbers over a result set.
+- **`\page N`** (`HandlePageMap`) — look up notes by page number
+  against the `PageMap` table.
+- **`\arrow "foo"` and arrow-only filters** (`HandleMatchingArrows`) —
+  arrow-type listings.
+- **`\lastnptr` + session STM** (`UpdateLastSawSection` /
+  `UpdateLastSawNPtr`) — records what the user most-recently viewed.
+  Also feeds back into `Intent` / `Ambient`, which we currently
+  emit as empty strings.
+- **Richer TOC** (`ShowChapterContexts` full path) — upstream returns
+  per-chapter `Context[]`, `Single[]`, `Common[]` built by
+  `IntersectContextParts` + `ContextIntentAnalysis`. Helpers are in
+  `src/server/http_server.go`, not `pkg/SSTorytime`, so porting them
+  means either moving or copying.
+- **`\help` content** — `CheckHelpQuery` rewrites the query but we
+  don't surface help text anywhere.
+- **Assets / images on node events** — a NodeEvent references asset
+  names; `/SearchAssets` still returns "not implemented".
+
+#### Infrastructure still missing
+
+- **PGlite `idb://` persistence is broken in our environment.**
+  Verified via isolated spikes: `new PGlite('idb://anything')` never
+  resolves `waitReady`; in-memory comes up in ~7s. Parsed data wipes
+  on every reload. Revisit when a future PGlite release fixes it or
+  once we wire OPFS persistence (needs COOP/COEP headers GitHub
+  Pages doesn't set).
+- **Auto-parse on session-reload is a clickwait.** Because PGlite is
+  in-memory, reloading a tab with a restored folder handle only
+  restores the binding — user still has to press ⟳ to rebuild the
+  graph. Goes away once persistence works.
+- **Drive Picker not wired up.** Manual prompt-for-folder-ID only.
+  Real Picker needs `picker.googleapis.com` + a referrer-restricted
+  Browser API key. Terraform stub in `infra/gcp/main.tf` (commented).
+- **Insert performance: ~14s for the 15-line `branches.n4l`.**
+  One-Promise-per-statement round-trips. Levers worth measuring:
+  bigger multi-statement batches, caching Configure + arrow upload
+  across sessions (needs persistence), COPY-style bulk load for the
+  arrow directory.
 - **No tests for the JS modules.** Go side has `internal/pgtext` and
-  `pkg/n4lparse/embeddedconfig_drift_test.go` coverage; JS modules are
-  untested. `reindex.js` and `db.js`' looksMultiStatement would be the
-  highest-value targets if we add JS tests.
-- **Reindex uses the real parser now but the n4l_files flat-schema
-  row-per-file remnant is still there.** With the upstream schema in
-  use we can delete the `n4l_files` / `nodes` / `arrows` / `links`
-  flat tables in `db.js` SCHEMA_SQL once the fetch-shim's `/searchN4L`
-  handler stops depending on them.
+  `pkg/n4lparse/embeddedconfig_drift_test.go` coverage; JS is
+  untested. Highest-value targets: `reindex.js`, `folder-handle.js`
+  fingerprint + change detection, `db.js` looksMultiStatement.
+- **Stale flat-schema tables in `db.js`.** `n4l_files` / `nodes` /
+  `arrows` / `links` from the earlier scaffolding are unused now
+  that the upstream schema is populated; safe to delete once no
+  fetch-shim path depends on them.
 
 ## Local dev
 
