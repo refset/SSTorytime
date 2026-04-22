@@ -173,7 +173,7 @@ func NewFile(filename string) {
 
 	if err != nil {
 		ParseError(ERR_NO_SUCH_FILE_FOUND+filename)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	if stat.Size() > LARGE_FILE {
@@ -307,7 +307,7 @@ func ClassifyConfigRole(sst *SST.PoSST,token string) {
 				PVerbose("In",SECTION_STATE,"short name",reln,"for",FWD_ARROW,", direction","+")
 			} else {
 				ParseError(ERR_BAD_ABBRV)
-				os.Exit(-1)
+				panic("n4lparse: fatal parse error")
 			}
 		}
 
@@ -329,7 +329,7 @@ func ClassifyConfigRole(sst *SST.PoSST,token string) {
 
 		case '+','-':
 			ParseError(ERR_SIMILAR_NO_SIGN)
-			os.Exit(-1)
+			panic("n4lparse: fatal parse error")
 
 		default:
 			similarity := strings.TrimSpace(token)
@@ -354,7 +354,7 @@ func ClassifyConfigRole(sst *SST.PoSST,token string) {
 
 			if defined && value != FWD_ARROW {
 				ParseError(ERR_ANNOTATION_REDEFINE)
-				os.Exit(-1)
+				panic("n4lparse: fatal parse error")
 			}
 
 			ANNOTATION[LAST_IN_SEQUENCE] = FWD_ARROW
@@ -370,7 +370,7 @@ func ClassifyConfigRole(sst *SST.PoSST,token string) {
 
 			if token[0] == '+' || token[0] == '-' {
 				ParseError(ERR_ILLEGAL_ANNOT_CHAR)
-				os.Exit(-1)
+				panic("n4lparse: fatal parse error")
 			}
 
 			Diag("Markup character defined in",SECTION_STATE, token)
@@ -402,12 +402,12 @@ func ClassifyConfigRole(sst *SST.PoSST,token string) {
 
 		default:
 			ParseError(ERR_ILLEGAL_CONFIGURATION+" "+SECTION_STATE)
-			os.Exit(-1)
+			panic("n4lparse: fatal parse error")
 		}
 
 	default:
 		ParseError(ERR_ILLEGAL_CONFIGURATION + " " + SECTION_STATE)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 }
 
@@ -453,11 +453,11 @@ func GetLinkArrowByName(sst *SST.PoSST,token string) SST.Link {
 			if err == nil {
 				if weight < 0 {
 					ParseError(ERR_NEGATIVE_WEIGHT+token)
-					os.Exit(-1)
+					panic("n4lparse: fatal parse error")
 				}
 				if weightcount > 1 {
 					ParseError(ERR_TOO_MANY_WEIGHTS+token)
-					os.Exit(-1)
+					panic("n4lparse: fatal parse error")
 				}
 				weight = float32(v)
 				weightcount++
@@ -478,7 +478,7 @@ func GetLinkArrowByName(sst *SST.PoSST,token string) SST.Link {
 
 		if !ok {
 			ParseError(SST.ERR_NO_SUCH_ARROW+"("+name+")")
-			os.Exit(-1)
+			panic("n4lparse: fatal parse error")
 		}
 	}
 
@@ -497,7 +497,7 @@ func LookupAlias(alias string, counter int) string {
 
 	if !ok || counter > len(value) {
 		ParseError(ERR_NO_SUCH_ALIAS)
-		os.Exit(1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	return LINE_ITEM_CACHE[alias][counter-1]
@@ -530,7 +530,7 @@ func ResolveAliasedItem(token string) string {
 
 	if len(split) < 2 {
 		ParseError(ERR_MISSING_LINE_LABEL_IN_REFERENCE)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	name := strings.TrimSpace(split[0])
@@ -540,7 +540,7 @@ func ResolveAliasedItem(token string) string {
 
 	if number < 1 {
 		ParseError(ERR_BAD_ALIAS_REFERENCE)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	return LookupAlias(name,number)
@@ -1011,7 +1011,7 @@ func ValidateLinkArgs(sst SST.PoSST,s string) []SST.ArrowPtr {
 			}
 		} else {
 			fmt.Println("\nThere is no link abbreviation called ",list[i])
-			os.Exit(-1)
+			panic("n4lparse: fatal parse error")
 		}
 	}
 
@@ -1303,7 +1303,7 @@ func GetToken(sst *SST.PoSST,src []rune, pos int) (string,int) {
 		} else {
 			if quote == '"' && pos+2 < len(src) && IsWhiteSpace(src[pos+1],src[pos+2]) {
 				ParseError(ERR_ILLEGAL_QUOTED_STRING_OR_REF)
-				os.Exit(-1)
+				panic("n4lparse: fatal parse error")
 			}
 			token,pos = ReadToLast(src,pos,quote)
 			strip := strings.Split(token,string(quote))
@@ -1376,7 +1376,7 @@ func ClassifyTokenRole(sst *SST.PoSST,token string) {
 	case '(':
 		if LINE_ITEM_STATE == ROLE_RELATION {
 			ParseError(ERR_MISSING_ITEM_RELN)
-			os.Exit(-1)
+			panic("n4lparse: fatal parse error")
 		}
 		link := GetLinkArrowByName(sst,token)
 		LINE_ITEM_STATE = ROLE_RELATION
@@ -1488,7 +1488,7 @@ func CheckLineAlias(token string) {
 
 	if token[0] == '@' && len(contig) == 1 {
 		ParseError(ERR_BAD_LABEL_OR_REF+token)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 }
 
@@ -1498,12 +1498,12 @@ func CheckChapter(name string) {
 
 	if name[0] == ':' {
 		ParseError(WARN_CHAPTER_CLASS_MIXUP+name)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	if strings.Contains(name,",") {
 		ParseError(ERR_CHAPTER_COMMA+name)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	SEQUENCE_MODE = false
@@ -1531,7 +1531,7 @@ func IdempAddLink(sst *SST.PoSST,from string, frptr SST.NodePtr, link SST.Link,t
 
 	if from == to {
 		ParseError(ERR_ARROW_SELFLOOP)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	if link.Wgt != 1 {
@@ -1550,7 +1550,7 @@ func IdempAddLink(sst *SST.PoSST,from string, frptr SST.NodePtr, link SST.Link,t
 
 	if from == "" || to == "" {
 		ParseError(ERR_MISSING_ITEM_SOMEWHERE + " (adding link)")
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	SST.AppendLinkToNode(sst,frptr,link,toptr)
@@ -1682,7 +1682,7 @@ func ReadToLast(src []rune,pos int, stop rune) (string,int) {
 	if IsQuote(stop) && src[pos-1] != stop {
 		e := fmt.Sprintf("%s starting at line %d (found token %s)",ERR_MISMATCH_QUOTE,starting_at,string(cpy))
 		ParseError(e)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	// Tokenize the string
@@ -1785,7 +1785,7 @@ func IsGeneralString(src []rune,pos int) bool {
 
 		msg := fmt.Sprintf("%s at position %d near '...%s...'",ERR_STRAY_PAREN,pos,string(src[before:after]))
 	        ParseError(msg)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	case '(':
 		return false
 	case '#':
@@ -2454,7 +2454,7 @@ func CheckNonNegative(i int) {
 
 	if i < 0 {
 		ParseError(ERR_MISSING_ITEM_SOMEWHERE)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 }
 
@@ -2464,7 +2464,7 @@ func CheckSection(item string) {
 
 	if len(SECTION_STATE) == 0 {
 		ParseError(ERR_MISSING_SECTION)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 }
 
@@ -2566,7 +2566,7 @@ func ReadUTF8FileBuffered(filename string) []rune {
 
 	if err != nil {
 		ParseError(ERR_NO_SUCH_FILE_FOUND + filename)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 	}
 
 	defer file.Close()
@@ -2601,7 +2601,7 @@ func ReadUTF8FileBuffered(filename string) []rune {
 	if err := scanner.Err(); err != nil {
 
 		fmt.Printf("Error reading file %s: %v\n", filename, err)
-		os.Exit(-1)
+		panic("n4lparse: fatal parse error")
 
 	}
 
