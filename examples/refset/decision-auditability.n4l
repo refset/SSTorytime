@@ -1,0 +1,84 @@
+
+- decision auditability
+
+:: core concepts ::
+
+decision auditability (means) the ability to reconstruct why a system produced a given output
+    "                (requires) inputs, rules, model version, data-as-known-then
+    "                (requires) stable identifiers and immutable history
+reproducibility (contrast) getting the same answer given same inputs
+explainability (contrast) human-interpretable reasoning for an output
+auditability (broader than) explainability — includes provenance and timing
+
+provenance (means) lineage of a datum: where it came from, how it was transformed
+lineage (related) dataset-level provenance in data platforms
+time-travel (enables) "re-run the decision as of time T"
+bitemporality (enables) distinguishing "what we knew then" from "what was true then"
+
+:: regulatory drivers ::
+
+GDPR Art. 22 (requires) right to meaningful information about automated decisions
+EU AI Act (2024) (requires) logging, traceability for high-risk AI systems
+SR 11-7 (US Fed) (requires) model risk management, documented decision trails
+BCBS 239 (requires) risk data aggregation with full lineage
+MiFID II (requires) reconstruction of trading decisions to the millisecond
+SOX (requires) audit trails over financial reporting systems
+NYDFS Part 500 (requires) cybersecurity event reconstruction
+HIPAA (requires) access and modification audit trails for PHI
+
+:: architectural approaches ::
+
+event sourcing (role) append-only event log as source of truth
+     "         (enables) replay to reconstruct any past state
+CQRS (related) separates write model (events) from read models (projections)
+bitemporal DB (role) system+valid time natively support as-of replay
+immutable ledgers (example) XTDB, Datomic, Kafka-as-database patterns
+feature stores (role) store model inputs at inference time for later audit
+model registries (role) MLflow, SageMaker, W&B — version model artifacts
+decision logs (pattern) record (inputs, model_version, output, timestamp) per call
+
+:: ML/AI-specific concerns ::
+
+LLMs (problem) non-determinism via temperature, sampling
+  "  (mitigation) log seeds, prompts, tool calls, retrieved context
+  "  (problem) training data provenance often opaque
+RAG (problem) retrieved chunks change as index changes — snapshot them
+drift (problem) feature or label drift invalidates prior decisions retroactively
+shadow deployment (practice) log proposed decisions without acting on them
+
+:: industry & research trends ::
+
+trend (item) "decision intelligence" platforms (Palantir, Quantexa, Decision Systems Intl)
+trend (item) OpenLineage standard for data lineage across tools
+trend (item) OpenTelemetry extending into semantic conventions for AI/LLM spans
+trend (item) policy-as-code: OPA, Cedar — auditable decision engines
+trend (item) rules engines re-emerging (Drools, Clara) for auditable logic
+trend (item) "glass-box" ML: interpretable models preferred in regulated sectors
+trend (item) differential privacy vs. auditability tension
+research (item) causal inference frameworks for counterfactual audits
+research (item) zk-proofs for auditing without revealing inputs
+
+:: challenges, tensions ::
+
+tension (item) GDPR erasure vs. immutable audit logs
+tension (item) log volume vs. retention cost
+tension (item) privacy of inputs vs. need for replay
+tension (item) system-time-only time travel misses retroactive corrections
+tension (item) vendor black boxes (foundation models) limit full auditability
+tension (item) "audit theatre" — logging without anyone able to replay
+
+:: key voices ::
+
+Cathy O'Neil (work) Weapons of Math Destruction — algorithmic accountability
+Rich Hickey (concept) "place-oriented programming" as anti-pattern; values over time
+Mark Burgess (concept) Promise Theory — commitments as units of audit
+Pat Helland (paper) "Immutability Changes Everything"
+Martin Fowler (concept) event sourcing patterns
+
+:: see also ::
+
+decision auditability (related) bitemporal databases
+    "                 (related) SQL-HTAP
+    "                 (related) event sourcing
+    "                 (related) model risk management
+    "                 (related) observability
