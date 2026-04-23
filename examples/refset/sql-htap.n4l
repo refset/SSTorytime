@@ -67,4 +67,22 @@ Umbra (note) Neumann follow-up to HyPer, compiled queries
 HTAP (related) bitemporal databases
 HTAP (related) lakehouse
 HTAP (related) decision auditability
-HTAP (related) CDC, event sourcing
+HTAP (related) CDC
+HTAP (related) event sourcing
+HTAP (related) SQL-HTAP
+XTDB 2 (related) bitemporal databases
+Apache Arrow (related) XTDB 2
+shared-storage lakehouse (related) lakehouse
+Iceberg (related) time-travel
+Delta (related) time-travel
+CDC (related) event sourcing
+Stonebraker (related) C-Store → Vertica
+Stonebraker (contrast) HTAP — "one size does not fit all"
+HyPer (related) SAP HANA — in-memory lineage
+Snowflake Unistore (related) Snowflake
+operational analytics (related) decision auditability
+Debezium (related) CDC
+Fivetran (related) CDC
+open table formats (related) Iceberg
+open table formats (related) Delta
+open table formats (related) Hudi

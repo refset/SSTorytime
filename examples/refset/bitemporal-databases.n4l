@@ -34,11 +34,21 @@ SQL:2011 (limitation) leaves bitemporal semantics partly to vendors
 :: industry implementations ::
 
 XTDB (role) immutable bitemporal document database from JUXT
-  "  (lang) Clojure, Datalog, SQL
+  "  (lang) Clojure
+  "  (lang) Datalog
+  "  (lang) SQL
   "  (feature) valid + system time as first-class
   "  (feature) SQL:2011 bitemporal semantics
+Datalog (means) declarative logic-programming query language with recursive rules
+  "     (related) Prolog
+  "     (contrast) SQL — set-oriented rather than rule-oriented
+  "     (role) XTDB's native query language alongside SQL
+Clojure (related) Rich Hickey
+  "     (concept) values over time — aligns with immutable/bitemporal stores
 XTDB 2 (note) rewritten on Apache Arrow columnar storage
   "   (feature) HTAP-style architecture, separation of storage and compute
+  "   (related) SQL-HTAP
+  "   (lang) Apache Arrow
 
 MarkLogic (feature) bitemporal document support since 8.0
 Snowflake (feature) unitemporal time travel via system time only
@@ -71,3 +81,15 @@ bitemporal (related) event sourcing
 bitemporal (related) CQRS
 bitemporal (related) decision auditability
 bitemporal (related) SQL-HTAP
+bitemporal (related) HTAP
+immutability (related) Pat Helland — "Immutability Changes Everything"
+SQL:2011 (related) SQL
+SQL:2011 temporal features (related) SQL:2011
+SQL (related) SQL:2011
+XTDB (related) Datomic
+XTDB (related) event sourcing
+XTDB 2 (related) Apache Arrow
+XTDB 2 (related) lakehouse
+GDPR (related) decision auditability
+MiFID II (related) decision auditability
+BCBS 239 (related) decision auditability

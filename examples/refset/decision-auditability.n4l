@@ -79,6 +79,27 @@ Martin Fowler (concept) event sourcing patterns
 
 decision auditability (related) bitemporal databases
     "                 (related) SQL-HTAP
+    "                 (related) HTAP
     "                 (related) event sourcing
     "                 (related) model risk management
     "                 (related) observability
+    "                 (related) bitemporality
+    "                 (related) provenance
+Pat Helland (related) bitemporal databases — immutability rationale
+Rich Hickey (related) Clojure
+Rich Hickey (related) Datomic
+Mark Burgess (related) Promise Theory
+event sourcing (related) CQRS
+event sourcing (related) XTDB
+event sourcing (related) CDC
+immutable ledgers (related) bitemporal
+feature stores (related) operational analytics
+OpenLineage (related) provenance
+OpenTelemetry (related) observability
+GDPR Art. 22 (related) GDPR
+BCBS 239 (related) MiFID II
+MiFID II (related) bitemporal databases — as-of reconstruction
+BCBS 239 (related) bitemporal databases — risk data lineage
+SR 11-7 from US Fed (related) model risk management
+time-travel (related) bitemporal
+time-travel (related) lakehouse
