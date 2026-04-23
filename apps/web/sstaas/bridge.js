@@ -53,7 +53,8 @@ export async function initWasm() {
   // Load the Go runtime and the WASM module.
   await ensureGoRuntime();
   const go = new window.Go();
-  const result = await WebAssembly.instantiateStreaming(fetch("/sstaas/sst.wasm"), go.importObject);
+  const wasmUrl = new URL("./sst.wasm", import.meta.url);
+  const result = await WebAssembly.instantiateStreaming(fetch(wasmUrl), go.importObject);
   go.run(result.instance); // do NOT await — main() blocks forever by design
 
   // Wait for Go's main() to publish __sstWasm.
@@ -76,7 +77,7 @@ function ensureGoRuntime() {
   if (window.Go) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "/sstaas/wasm_exec.js";
+    s.src = new URL("./wasm_exec.js", import.meta.url).href;
     s.onload = resolve;
     s.onerror = () => reject(new Error("failed to load wasm_exec.js"));
     document.head.appendChild(s);

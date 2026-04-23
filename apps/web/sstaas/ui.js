@@ -571,7 +571,7 @@ async function showOverlay(name) {
   ov.removeAttribute("hidden");
   try {
     if (!overlayCache[name]) {
-      const r = await fetch(`/sstaas/legal/${name}.html`);
+      const r = await fetch(new URL(`./legal/${name}.html`, import.meta.url));
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       overlayCache[name] = await r.text();
     }

@@ -81,9 +81,12 @@ inject = """    <!-- sstaas client-side-drive additions -->
         };
       })();
     </script>
-    <script type="module" defer src="/sstaas/bootstrap.js"></script>
+    <script type="module" defer src="sstaas/bootstrap.js"></script>
   </head>"""
 html = html.replace("  </head>", inject, 1)
+# Rewrite absolute asset paths so the SPA works under a subpath
+# (e.g. GitHub Pages at /SSTorytime/) as well as from /.
+html = re.sub(r'(href|src)="/([^/"])', r'\1="\2', html)
 open(dst, "w").write(html)
 PY
 
