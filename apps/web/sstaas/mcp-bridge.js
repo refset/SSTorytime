@@ -18,8 +18,18 @@ import { wasmSearch } from "./bridge.js";
 let ws = null;
 let url = null;
 let reconnectTimer = null;
+let wantConnected = false;
+const RECONNECT_MS = 5000;
 const listeners = new Set();
 let currentTarget = null;
+
+function scheduleReconnect() {
+  if (!wantConnected || reconnectTimer || ws) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (wantConnected && !ws && url) openSocket();
+  }, RECONNECT_MS);
+}
 
 function emit(status, detail = {}) {
   for (const fn of listeners) {
@@ -44,19 +54,29 @@ export function status() {
 }
 
 export function connect(targetUrl, { target } = {}) {
-  disconnect();
+  teardownSocket();
   url = targetUrl;
   currentTarget = target ?? currentTarget;
+  wantConnected = true;
+  openSocket();
+}
+
+function openSocket() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  let sock;
   try {
-    ws = new WebSocket(targetUrl);
+    sock = new WebSocket(url);
   } catch (err) {
     emit("error", { error: err.message });
+    scheduleReconnect();
     return;
   }
+  ws = sock;
   emit("connecting");
 
-  ws.addEventListener("open", () => {
-    ws.send(JSON.stringify({
+  sock.addEventListener("open", () => {
+    if (sock !== ws) return;
+    sock.send(JSON.stringify({
       type: "hello",
       sessionId: getSessionId(),
       target: currentTarget,
@@ -64,7 +84,7 @@ export function connect(targetUrl, { target } = {}) {
     emit("connected");
   });
 
-  ws.addEventListener("message", async (ev) => {
+  sock.addEventListener("message", async (ev) => {
     let msg;
     try { msg = JSON.parse(ev.data); }
     catch (e) { console.warn("mcp: bad JSON frame", ev.data); return; }
@@ -72,30 +92,39 @@ export function connect(targetUrl, { target } = {}) {
     const { requestId, method, payload } = msg;
     try {
       const result = await dispatch(method, payload ?? {});
-      ws.send(JSON.stringify({ type: "response", requestId, payload: result }));
+      sock.send(JSON.stringify({ type: "response", requestId, payload: result }));
     } catch (err) {
       console.error("mcp handler", method, err);
-      ws.send(JSON.stringify({ type: "response", requestId, error: String(err.message ?? err) }));
+      sock.send(JSON.stringify({ type: "response", requestId, error: String(err.message ?? err) }));
     }
   });
 
-  ws.addEventListener("close", (ev) => {
-    emit("disconnected", { code: ev.code, reason: ev.reason });
+  sock.addEventListener("close", (ev) => {
+    if (sock !== ws) return;
     ws = null;
+    emit("disconnected", { code: ev.code, reason: ev.reason });
+    scheduleReconnect();
   });
 
-  ws.addEventListener("error", (ev) => {
+  sock.addEventListener("error", (ev) => {
+    if (sock !== ws) return;
     console.warn("mcp ws error", ev);
     emit("error", { error: "connection error (see console)" });
   });
 }
 
-export function disconnect() {
+function teardownSocket() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (ws) {
-    try { ws.close(); } catch { /* ignore */ }
+    const sock = ws;
     ws = null;
+    try { sock.close(); } catch { /* ignore */ }
   }
+}
+
+export function disconnect() {
+  wantConnected = false;
+  teardownSocket();
 }
 
 // Called by ui.js whenever the user changes the repo target so the
