@@ -86,9 +86,23 @@ async function handleSearchN4L(body) {
   // DoOrbitPanel unconditionally on the response, and DoOrbitPanel
   // crashes on anything except an Orbits envelope. jsSearch returns
   // an empty-Orbits response for empty queries so that path is safe.
-  const name = (body.name ?? body.query ?? "").trim();
-  // Empty-query bootstraps shouldn't flash a spinner; only real queries do.
-  const useSpinner = !!name;
+  let name = (body.name ?? body.query ?? "").trim();
+
+  // Initial load (no query) behavior:
+  //  - If no source is chosen yet, return an empty Orbits envelope
+  //    so the SPA shows "No result" instead of trying to render
+  //    against an empty PGlite. Nothing fetches, nothing flashes.
+  //  - If a source is chosen, default to \toc so the user lands on
+  //    a useful overview instead of the time-of-day reminders query.
+  if (!name) {
+    // Initial page load (upstream's FetchPage with no body). We never
+    // fire a real search here — if a source is picked, ui.js drives
+    // \toc after the (re)index completes; if not, the empty envelope
+    // just yields "No result" in the SPA.
+    return emptyOrbits();
+  }
+
+  const useSpinner = (body.name ?? body.query ?? "").trim() !== "";
   if (useSpinner) await showSpinner(`Searching for "${name}"…`);
   try {
     const raw = await wasmSearch(name);
@@ -96,6 +110,16 @@ async function handleSearchN4L(body) {
   } finally {
     if (useSpinner) hideSpinner();
   }
+}
+
+function emptyOrbits() {
+  return {
+    Response: "Orbits",
+    Content: [],
+    Time: "",
+    Intent: "",
+    Ambient: "",
+  };
 }
 
 // ---- Spinner ----

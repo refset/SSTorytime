@@ -9,11 +9,11 @@
 const SPLASH_HTML = `
 <div id="sstaas-splash" role="status" aria-live="polite">
   <div id="sstaas-splash-card">
-    <h1>SSToryGraph</h1>
+    <h1>SSTorytime</h1>
     <div id="sstaas-splash-dots" aria-hidden="true">
       <span></span><span></span><span></span>
     </div>
-    <div id="sstaas-splash-msg">Loading…</div>
+    <div id="sstaas-splash-msg">Starting PGlite + WASM runtime…</div>
   </div>
 </div>`;
 
@@ -70,14 +70,21 @@ export function showSplash() {
 }
 
 export function setSplashMessage(text, isError = false) {
+  // Non-error status updates are swallowed on purpose — the splash
+  // just reads "Starting PGlite + WASM runtime…" throughout. Errors
+  // still come through so a failed bootstrap is visible.
+  if (!isError) return;
   const msg = splashEl?.querySelector("#sstaas-splash-msg");
   if (!msg) return;
   msg.textContent = text;
-  msg.classList.toggle("sstaas-splash-err", !!isError);
+  msg.classList.add("sstaas-splash-err");
 }
 
 export function hideSplash() {
   if (!splashEl) return;
+  // Reveal the underlying UI before the fade starts so it's ready
+  // behind the splash as opacity drops to zero.
+  document.documentElement.classList.remove("sstaas-loading");
   splashEl.classList.add("sstaas-splash-fade");
   const el = splashEl;
   splashEl = null;

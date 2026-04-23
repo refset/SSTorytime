@@ -10,6 +10,35 @@ import { initWasm } from "./bridge.js";
 import { injectUI } from "./ui.js";
 import { showSplash, setSplashMessage, hideSplash } from "./splash.js";
 
+// Upstream's pushStateSafe rewrites the URL to `?search=…`, wiping
+// any other query params. We carry ?source= / ?owner= / etc. in the
+// URL so reloads are unambiguous, so patch history.pushState +
+// history.replaceState to merge our keys back in whenever upstream
+// pushes a new URL.
+(function patchHistoryToPreserveSourceParams() {
+  const OUR_KEYS = ["source", "owner", "repo", "branch", "path"];
+  function merge(target) {
+    try {
+      const here = new URL(location.href);
+      const there = new URL(target, location.href);
+      for (const k of OUR_KEYS) {
+        if (!there.searchParams.has(k) && here.searchParams.has(k)) {
+          there.searchParams.set(k, here.searchParams.get(k));
+        }
+      }
+      return there.pathname + there.search + there.hash;
+    } catch { return target; }
+  }
+  const origPush = history.pushState.bind(history);
+  const origReplace = history.replaceState.bind(history);
+  history.pushState = function (state, title, url) {
+    return origPush(state, title, url == null ? url : merge(url));
+  };
+  history.replaceState = function (state, title, url) {
+    return origReplace(state, title, url == null ? url : merge(url));
+  };
+})();
+
 // Splash goes up as early as possible — synchronously, once the body
 // exists. After that PGlite / WASM / SST.OpenWasm run, each updating
 // the splash message, and the whole thing fades away together. If any

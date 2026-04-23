@@ -32,6 +32,11 @@ cp "$PUBLIC/main.js" "$DIST/main.js"
 # Strip leading slash from theme CSS paths so they resolve against
 # the document base URL (needed for subpath deploys like GH Pages).
 sed -i "s|setAttribute('href', '/\\([a-z]*\\.css\\)')|setAttribute('href', '\\1')|g" "$DIST/main.js"
+# Upstream shrinks canvas labels + line widths to 0.6× on any viewport
+# < 1300px via its `mob` global, which makes orbit-view text painful
+# to read on a laptop. Narrow the mobile trigger to <450 so desktop
+# sizes get the full-size canvas type.
+sed -i "s|window.innerWidth < 1300|window.innerWidth < 450|g" "$DIST/main.js"
 
 echo "Copying apps/web/sstaas/ → dist/sstaas/…"
 cp -r "$SSTAAS"/* "$DIST/sstaas/"
@@ -70,6 +75,15 @@ import sys, re
 src, dst = sys.argv[1], sys.argv[2]
 html = open(src).read()
 inject = """    <!-- sstaas client-side-drive additions -->
+    <!-- Hide the half-wired upstream UI until splash.js mounts. The
+         class is set synchronously in the head so the first paint is
+         already blank; splash.js removes it inside hideSplash(). -->
+    <style>
+      html.sstaas-loading body > *:not(#sstaas-splash) { visibility: hidden; }
+    </style>
+    <script>
+      document.documentElement.classList.add("sstaas-loading");
+    </script>
     <script>
       // Early fetch pre-shim. Any call to one of our handler paths is
       // queued until window.__sstaasFlushFetchQueue() fires (from

@@ -16,25 +16,97 @@ import {
 } from "./auth.js";
 import { reindex } from "./reindex.js";
 import { parseN4L } from "./bridge.js";
+import { query as dbQuery } from "./db.js";
 import { getSessionId } from "./session.js";
 import * as fh from "./folder-handle.js";
 import * as mcp from "./mcp-bridge.js";
 import { BUILD } from "./build-info.js";
 
 const TARGET_KEY = "sstaas-github-target";
+const SOURCE_KEY = "sstaas-source-mode"; // "github" | "local" | null
 const MCP_URL_KEY = "sstaas-mcp-url";
 const MCP_ENABLED_KEY = "sstaas-mcp-enabled";
 const DEFAULT_MCP_URL = "ws://localhost:8889/ws";
 const POLL_MS = 30_000;
 
+// ---- Source mode (github | local | none) ----
+//
+// Exactly one source drives the graph at a time. The choice is
+// mirrored to the URL's ?source= param (+ owner/repo/branch/path for
+// github) so a refresh is unambiguous. localStorage keeps the same
+// info for when the user lands on the bare URL.
+
+function parseUrlSource() {
+  const p = new URLSearchParams(location.search);
+  const s = p.get("source");
+  if (s === "github") {
+    const owner = p.get("owner") || "";
+    const repo = p.get("repo") || "";
+    if (!owner || !repo) return { mode: null };
+    return {
+      mode: "github",
+      target: {
+        owner, repo,
+        branch: p.get("branch") || null,
+        path: p.get("path") || null,
+      },
+    };
+  }
+  if (s === "local") return { mode: "local" };
+  return { mode: null };
+}
+
+function writeUrlSource(mode, target) {
+  const url = new URL(location.href);
+  // Clear only the keys we own; preserve anything else (notably
+  // upstream's ?search= param, which its AppRouter reads on load).
+  for (const k of ["source", "owner", "repo", "branch", "path"]) {
+    url.searchParams.delete(k);
+  }
+  if (mode === "github" && target) {
+    url.searchParams.set("source", "github");
+    url.searchParams.set("owner", target.owner);
+    url.searchParams.set("repo", target.repo);
+    if (target.branch) url.searchParams.set("branch", target.branch);
+    if (target.path) url.searchParams.set("path", target.path);
+  } else if (mode === "local") {
+    url.searchParams.set("source", "local");
+  }
+  history.replaceState(null, "", url);
+}
+
+function getSource() {
+  return localStorage.getItem(SOURCE_KEY);
+}
+
+function setSource(mode, target) {
+  if (mode) localStorage.setItem(SOURCE_KEY, mode);
+  else localStorage.removeItem(SOURCE_KEY);
+  writeUrlSource(mode, target ?? (mode === "github" ? loadTarget() : null));
+}
+
 // ---- Markup injection ----
 
 const CONTROLS_HTML = `
   <div id="sstaas-controls">
-    <button id="sstaas-signin" class="sstaas-btn">Sign in with GitHub</button>
-    <button id="sstaas-signout" class="sstaas-btn" hidden>Sign out</button>
+    <span class="sstaas-brand">
+      <strong class="sstaas-brand-title">SSTorytime</strong>
+      <a class="sstaas-brand-gh" href="https://github.com/refset/SSTorytime" target="_blank" rel="noopener" title="View the refset/SSTorytime fork on GitHub" aria-label="GitHub repository">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+    </span>
 
-    <span id="sstaas-gh-who" class="sstaas-who" hidden></span>
+    <span id="sstaas-gh-who" class="sstaas-who" hidden>
+      <span id="sstaas-gh-who-name"></span>
+      <span class="sstaas-signout-wrap">(<a id="sstaas-signout" href="#" class="sstaas-signout-link">sign out</a>)</span>
+    </span>
+
+    <span id="sstaas-source-badge" class="sstaas-source-badge" data-mode="none">
+      <span id="sstaas-source-value" class="sstaas-source-value">Load N4L from:</span>
+      <button id="sstaas-signin" class="sstaas-source-choice">GitHub</button>
+      <button id="sstaas-local-pick" class="sstaas-source-choice">Local folder</button>
+      <a id="sstaas-source-switch" href="#" class="sstaas-switch-link" hidden title="Clear current source and pick again">change</a>
+    </span>
 
     <span id="sstaas-gh-form" class="sstaas-gh-form" hidden>
       <input id="sstaas-gh-owner" class="sstaas-input" placeholder="owner" size="12" value="markburgess">
@@ -47,14 +119,11 @@ const CONTROLS_HTML = `
 
     <span id="sstaas-gh-row" class="sstaas-local-row" hidden>
       <span id="sstaas-gh-dot" class="sstaas-dot" title=""></span>
-      <code id="sstaas-gh-label" class="sstaas-folder"></code>
       <button id="sstaas-reindex" class="sstaas-icon-btn" title="Re-list + re-fetch + re-parse">⟳</button>
-      <button id="sstaas-gh-change" class="sstaas-icon-btn" title="Pick a different target">✎</button>
     </span>
 
-    <!-- Local-folder binding. One of these two is visible at a time:
-         the pick button, or the picked-folder row. -->
-    <button id="sstaas-local-pick" class="sstaas-btn" title="Pick a local directory; every .n4l inside is parsed. No GitHub required.">Open local n4l directory</button>
+    <!-- Hidden file-input fallback for browsers without File System
+         Access API. Triggered programmatically from onLocalPick. -->
     <input id="sstaas-local-fallback" type="file" webkitdirectory directory multiple hidden>
 
     <span id="sstaas-local-row" class="sstaas-local-row" hidden>
@@ -68,9 +137,8 @@ const CONTROLS_HTML = `
          this tab's search. Opt-in; nothing connects until ticked. -->
     <label class="sstaas-mcp-row" title="Bridge this tab to a local MCP-SST server so Claude Code can call searches here.">
       <input id="sstaas-mcp-toggle" type="checkbox">
-      <span>Connect local MCP</span>
-      <input id="sstaas-mcp-url" class="sstaas-input" placeholder="ws://localhost:8889/ws" size="22" value="${DEFAULT_MCP_URL}">
-      <span id="sstaas-mcp-dot" class="sstaas-dot" title="Not connected"></span>
+      <span>Use <a href="https://github.com/refset/SST-MCP" target="_blank" rel="noopener">MCP</a></span>
+      <span id="sstaas-mcp-dot" class="sstaas-dot" title="Not connected" hidden></span>
     </label>
 
     <span id="sstaas-status" class="sstaas-status"></span>
@@ -106,6 +174,36 @@ const STYLE = `
     border-bottom: 1px solid #ddd; font-size: 0.88rem;
     flex-wrap: wrap;
   }
+
+  /* Upstream's <page> has no inline padding, and several descendants
+     (section#canvas at max-width: 100svw, .card-view / .notes-view at
+     95svw) hard-code viewport-relative widths that spill past any
+     padding we put on <page>. Pad <page>, then clamp those
+     descendants to the padded content area. */
+  page {
+    padding: 1rem clamp(1rem, 3vw, 2.5rem) 2rem;
+    box-sizing: border-box;
+    /* Force the implicit grid to a single flexible column that fits
+       inside the padded content area. Without this, the column's
+       width is derived from the widest child (section#canvas at
+       100svw), which spills past the padding. */
+    grid-template-columns: minmax(0, 1fr);
+  }
+  page > section#canvas {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    justify-self: stretch;
+  }
+  page .card-view,
+  page .notes-view {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+  }
+  @media (max-width: 600px) {
+    page { padding: 0.75rem 0.75rem 1.5rem; }
+  }
   .sstaas-btn {
     padding: 0.3rem 0.7rem; border: 1px solid #c8c8c4; background: #fff;
     border-radius: 4px; cursor: pointer; font-size: 0.85rem; color: inherit;
@@ -119,13 +217,53 @@ const STYLE = `
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sstaas-status { color: #555; font-size: 0.82rem; min-width: 12rem; white-space: pre-line; }
-  .sstaas-who { color: #555; font-size: 0.82rem; }
+  .sstaas-who { color: #555; font-size: 0.82rem; display: inline-flex; gap: 0.3rem; align-items: baseline; }
+  .sstaas-signout-wrap { color: #888; font-size: 0.78rem; }
+  .sstaas-signout-link {
+    color: inherit; text-decoration: none; border-bottom: 1px dotted #aaa;
+  }
+  .sstaas-signout-link:hover { border-bottom-style: solid; color: #b33030; }
   .sstaas-gh-form { display: inline-flex; align-items: center; gap: 0.25rem; }
   .sstaas-input {
     padding: 0.2rem 0.35rem; border: 1px solid #c8c8c4; border-radius: 3px;
     font-size: 0.82rem; background: #fff; color: inherit;
   }
   .sstaas-sep { color: #888; }
+
+  .sstaas-brand {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    margin-right: 0.25rem;
+  }
+  .sstaas-brand-title { font-size: 0.92rem; letter-spacing: 0.01em; }
+  .sstaas-brand-gh {
+    display: inline-flex; align-items: center; color: #555;
+  }
+  .sstaas-brand-gh:hover { color: #000; }
+
+  .sstaas-source-badge {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    padding: 0.15rem 0.65rem; border-radius: 999px;
+    background: #fff; border: 1px solid #c8c8c4;
+    font-size: 0.82rem; color: #333;
+  }
+  .sstaas-source-badge[data-mode="github"] {
+    background: #eef6ff; border-color: #4a86c8; color: #1c4577;
+  }
+  .sstaas-source-badge[data-mode="local"] {
+    background: #eef7ee; border-color: #3a9a3a; color: #1f5a1f;
+  }
+  .sstaas-source-value { opacity: 0.85; }
+  .sstaas-source-choice {
+    padding: 0.1rem 0.55rem; font-size: 0.8rem;
+    border: 1px solid #c8c8c4; background: #fff; color: inherit;
+    border-radius: 4px; cursor: pointer;
+  }
+  .sstaas-source-choice:hover { background: #efefe9; }
+  .sstaas-switch-link {
+    color: inherit; opacity: 0.7; text-decoration: none;
+    font-size: 0.75rem; border-bottom: 1px dotted currentColor;
+  }
+  .sstaas-switch-link:hover { opacity: 1; }
 
   .sstaas-local-row {
     display: inline-flex; align-items: center; gap: 0.35rem;
@@ -222,16 +360,36 @@ export async function injectUI({ isBridgeReady } = {}) {
 
   await initAuth();
 
+  // Reconcile URL with localStorage on load. URL wins when it carries
+  // an explicit ?source=… so shared links land in the intended mode.
+  const urlSrc = parseUrlSource();
+  if (urlSrc.mode === "github" && urlSrc.target) {
+    localStorage.setItem(TARGET_KEY, JSON.stringify(urlSrc.target));
+    localStorage.setItem(SOURCE_KEY, "github");
+  } else if (urlSrc.mode === "local") {
+    localStorage.setItem(SOURCE_KEY, "local");
+  } else if (getSource()) {
+    // No URL param but localStorage remembers a mode — mirror it.
+    writeUrlSource(getSource(), loadTarget());
+  }
+
+  document.getElementById("sstaas-source-switch").addEventListener("click", (e) => {
+    e.preventDefault();
+    onSwitchSource();
+  });
   document.getElementById("sstaas-signin").addEventListener("click", onSignIn);
-  document.getElementById("sstaas-signout").addEventListener("click", () => {
+  document.getElementById("sstaas-signout").addEventListener("click", (e) => {
+    e.preventDefault();
     signOut();
     localStorage.removeItem(TARGET_KEY);
+    setSource(null);
     refresh();
   });
   document.getElementById("sstaas-gh-load").addEventListener("click", onLoadTarget);
-  document.getElementById("sstaas-gh-change").addEventListener("click", () => {
-    localStorage.removeItem(TARGET_KEY);
-    refresh();
+  ["sstaas-gh-owner", "sstaas-gh-repo", "sstaas-gh-branch", "sstaas-gh-path"].forEach((id) => {
+    document.getElementById(id).addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); onLoadTarget(); }
+    });
   });
   document.getElementById("sstaas-reindex").addEventListener("click", () => runReindex());
 
@@ -244,28 +402,30 @@ export async function injectUI({ isBridgeReady } = {}) {
   });
   document.getElementById("sstaas-local-refresh").addEventListener("click", onLocalRefresh);
 
-  // MCP bridge toggle.
+  // MCP bridge toggle. URL is sourced from localStorage (override via
+  // config.local.js or devtools) — we don't expose it in the bar.
   const mcpToggle = document.getElementById("sstaas-mcp-toggle");
-  const mcpUrl = document.getElementById("sstaas-mcp-url");
-  mcpUrl.value = localStorage.getItem(MCP_URL_KEY) || DEFAULT_MCP_URL;
   mcpToggle.checked = localStorage.getItem(MCP_ENABLED_KEY) === "1";
+  const mcpDot = document.getElementById("sstaas-mcp-dot");
+  const syncMcpDotVisible = () => {
+    if (!mcpDot) return;
+    if (mcpToggle.checked) mcpDot.removeAttribute("hidden");
+    else mcpDot.setAttribute("hidden", "");
+  };
+  syncMcpDotVisible();
   mcpToggle.addEventListener("change", () => {
     localStorage.setItem(MCP_ENABLED_KEY, mcpToggle.checked ? "1" : "0");
+    syncMcpDotVisible();
     applyMcpToggle();
   });
-  mcpUrl.addEventListener("change", () => {
-    const v = mcpUrl.value.trim();
-    localStorage.setItem(MCP_URL_KEY, v);
-    if (mcpToggle.checked) applyMcpToggle();
-  });
   mcp.onStatusChange(({ status }) => {
-    const dot = document.getElementById("sstaas-mcp-dot");
-    if (!dot) return;
-    dot.classList.remove("green", "yellow", "red");
-    if (status === "connected") { dot.classList.add("green"); dot.title = "Connected: " + mcpUrl.value; }
-    else if (status === "connecting") { dot.classList.add("yellow"); dot.title = "Connecting…"; }
-    else if (status === "error") { dot.classList.add("red"); dot.title = "Connection error"; }
-    else dot.title = "Not connected";
+    if (!mcpDot) return;
+    mcpDot.classList.remove("green", "yellow", "red");
+    const url = (localStorage.getItem(MCP_URL_KEY) || DEFAULT_MCP_URL).trim();
+    if (status === "connected") { mcpDot.classList.add("green"); mcpDot.title = "Connected: " + url; }
+    else if (status === "connecting") { mcpDot.classList.add("yellow"); mcpDot.title = "Connecting…"; }
+    else if (status === "error") { mcpDot.classList.add("red"); mcpDot.title = "Connection error"; }
+    else mcpDot.title = "Not connected";
   });
   applyMcpToggle();
 
@@ -273,7 +433,22 @@ export async function injectUI({ isBridgeReady } = {}) {
   refresh();
 
   restoreLocalFolder().catch((e) => console.warn("restore folder:", e.message));
+  autoReindexIfEmpty().catch((e) => console.warn("auto-reindex:", e.message));
   setInterval(() => pollForChanges().catch(() => {}), POLL_MS);
+}
+
+// If the URL landed us in github mode with a fully-specified target
+// but the local PGlite has nothing in it yet, kick off a reindex so
+// a fresh visit / shared link doesn't require a manual ⟳ press.
+async function autoReindexIfEmpty() {
+  if (getSource() !== "github") return;
+  const target = loadTarget();
+  if (!target?.owner || !target?.repo) return;
+  await (window.__sstaasReady?.() ?? Promise.resolve());
+  const r = await dbQuery("SELECT count(*)::int AS n FROM n4l_files");
+  const n = r?.rows?.[0]?.[0] ?? 0;
+  if (n > 0) return;
+  await runReindex();
 }
 
 // ---- GitHub flow ----
@@ -294,6 +469,12 @@ function applyMcpToggle() {
 }
 
 function onSignIn() {
+  // Already have a valid token? Skip the prompt, just switch mode.
+  if (isSignedIn()) {
+    setSource("github", loadTarget());
+    refresh();
+    return;
+  }
   const tokenUrl = "https://github.com/settings/personal-access-tokens/new";
   showOverlayHTML(
     `<h1>Sign in with a GitHub token</h1>
@@ -310,20 +491,24 @@ function onSignIn() {
      <textarea id="sstaas-gh-token-input" rows="3"
                style="width:100%; box-sizing:border-box; font-family: ui-monospace, monospace; font-size: 0.85rem; padding: 0.4rem;"
                placeholder="github_pat_…"></textarea>
-     <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
+     <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
        <button id="sstaas-gh-token-save" class="sstaas-btn primary">Save token</button>
+       <a id="sstaas-gh-token-skip" href="#" style="font-size: 0.82rem; color: #555;">Skip for now — only access public repos</a>
        <span id="sstaas-gh-token-msg" style="color: #b33030; font-size: 0.85rem;"></span>
      </div>`
   );
   const input = document.getElementById("sstaas-gh-token-input");
   const msg   = document.getElementById("sstaas-gh-token-msg");
   const btn   = document.getElementById("sstaas-gh-token-save");
+  const skip  = document.getElementById("sstaas-gh-token-skip");
   input.focus();
   const submit = async () => {
     btn.disabled = true;
     msg.textContent = "";
     try {
       const user = await signInWithToken(input.value);
+      setSource("github", loadTarget());
+      refresh();
       hideOverlay();
       setStatus(`Signed in to GitHub as @${user.login}.`);
     } catch (err) {
@@ -336,6 +521,16 @@ function onSignIn() {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
   });
+  skip.addEventListener("click", (e) => {
+    e.preventDefault();
+    // Drop any cached target so the repo picker appears with its
+    // defaults (markburgess / SSTorytime / main / examples).
+    localStorage.removeItem(TARGET_KEY);
+    setSource("github", null);
+    refresh();
+    hideOverlay();
+    setStatus("Continuing without a token — public repos only, subject to GitHub's anonymous rate limits.");
+  });
 }
 
 async function onLoadTarget() {
@@ -346,6 +541,7 @@ async function onLoadTarget() {
   if (!owner || !repo) { setStatus("Owner and repo are required."); return; }
   const target = { owner, repo, branch, path };
   localStorage.setItem(TARGET_KEY, JSON.stringify(target));
+  setSource("github", target);
   mcp.updateTarget(target);
   refresh();
   setDot("yellow", "Target loaded — press ⟳ to index", "sstaas-gh-dot");
@@ -374,6 +570,7 @@ async function runReindex() {
       return;
     }
     reportParseResult(out, fileCount, "sstaas-gh-dot", performance.now() - t0);
+    driveDefaultToc();
   } catch (err) {
     console.error("reindex failed", err);
     setDot("red", "Error: " + err.message, "sstaas-gh-dot");
@@ -387,8 +584,31 @@ function targetLabel(t) {
   return `${t.owner}/${t.repo}${t.branch ? `@${t.branch}` : ""}${t.path ? `:${t.path}` : ""}`;
 }
 
+// Type \toc into the upstream search box and press Go, so the user
+// lands on a populated table of contents right after a (re)index
+// completes. Deferred so the "Parsed N file(s)…" status message has
+// time to paint before upstream's fetch replaces the visible state.
+// Skipped when the user has already typed something.
+function driveDefaultToc() {
+  const currentInput = document.getElementById("name");
+  if (!currentInput) return;
+  const startedEmpty = !currentInput.value || currentInput.value.trim() === "";
+  if (!startedEmpty) return;
+  setTimeout(() => {
+    const input = document.getElementById("name");
+    const button = document.getElementById("gosubmit");
+    if (!input || !button) return;
+    // Re-check: the user might have typed something during the delay.
+    if (input.value && input.value.trim() !== "") return;
+    input.value = "\\toc";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    button.click();
+  }, 600);
+}
+
 async function refreshGitHubWho() {
-  const who = document.getElementById("sstaas-gh-who");
+  const who = document.getElementById("sstaas-gh-who-name");
   if (!who) return;
   if (!isSignedIn()) { who.textContent = ""; return; }
   try {
@@ -405,17 +625,45 @@ async function refreshGitHubWho() {
 function refresh() {
   const signedIn = isSignedIn();
   const target = loadTarget();
-  show("sstaas-signin", !signedIn);
-  show("sstaas-signout", signedIn);
-  show("sstaas-gh-who", signedIn);
-  show("sstaas-gh-form", signedIn && !target);
-  show("sstaas-gh-row", signedIn && !!target);
-  const fEl = document.getElementById("sstaas-gh-label");
-  if (fEl && target) {
-    fEl.textContent = targetLabel(target);
-    fEl.title = targetLabel(target);
+  let mode = getSource();
+
+  // Self-heal: if mode is local but we have no localState, the user
+  // has no way to refresh — drop back to none. GitHub mode is
+  // tolerated without a signed-in user so public repos work from a
+  // shared ?source=github URL with no PAT in the browser.
+  if (mode === "local" && !localState) mode = null;
+  if (mode !== getSource()) setSource(mode);
+
+  const inGithub = mode === "github";
+  const inLocal  = mode === "local";
+  const inNone   = !mode;
+
+  // Inline chooser lives inside the badge when mode is none.
+  show("sstaas-signin",     inNone);
+  show("sstaas-local-pick", inNone);
+
+  // GitHub controls: only while mode is github.
+  show("sstaas-gh-who",  inGithub && signedIn);
+  show("sstaas-gh-form", inGithub && !target);
+  show("sstaas-gh-row",  inGithub && !!target);
+
+  // Local controls: only while mode is local.
+  show("sstaas-local-row", inLocal && !!localState);
+
+  // Switch link is offered whenever a mode is chosen.
+  show("sstaas-source-switch", !inNone);
+
+  const badge = document.getElementById("sstaas-source-badge");
+  const val   = document.getElementById("sstaas-source-value");
+  if (badge) badge.dataset.mode = mode ?? "none";
+  if (val) {
+    if (inGithub && target) val.textContent = `GitHub · ${targetLabel(target)}`;
+    else if (inGithub)      val.textContent = "GitHub · pick a repo";
+    else if (inLocal)       val.textContent = `Local · ${localState?.label ?? "…"}`;
+    else                    val.textContent = "Load N4L from:";
   }
-  if (signedIn) refreshGitHubWho();
+
+  if (signedIn && inGithub) refreshGitHubWho();
 }
 
 function show(id, on) {
@@ -475,11 +723,6 @@ function reportParseResult(out, fileCount, dotId, elapsedMs) {
 //   { label, files, lastFingerprint }    (webkitdirectory fallback — in-memory only)
 let localState = null;
 
-function showLocalRow(on) {
-  show("sstaas-local-pick", !on);
-  show("sstaas-local-row", on);
-}
-
 function setLocalName(label) {
   const el = document.getElementById("sstaas-local-name");
   if (el) el.textContent = label;
@@ -500,7 +743,8 @@ async function onLocalPick() {
     try { await fh.store(getSessionId(), handle); }
     catch (err) { console.warn("[sstaas] couldn't persist folder handle:", err.message); }
     localState = { handle, label: fh.labelFromHandle(handle), lastFingerprint: "" };
-    showLocalRow(true);
+    setSource("local");
+    refresh();
     setLocalName(localState.label);
     setDot("yellow", "Newly picked — press refresh to parse");
     await parseFromHandle();
@@ -512,10 +756,24 @@ async function onLocalPick() {
 async function onLocalFallback(files) {
   const label = fh.labelFromFileList(files);
   localState = { files, label, lastFingerprint: "" };
-  showLocalRow(true);
+  setSource("local");
+  refresh();
   setLocalName(label);
   setDot("yellow", "Newly picked — press refresh to parse");
   await parseFromFiles(files);
+}
+
+function onSwitchSource() {
+  // Tear down current source and return the user to the chooser.
+  const mode = getSource();
+  if (mode === "github") {
+    localStorage.removeItem(TARGET_KEY);
+  } else if (mode === "local") {
+    localState = null;
+    fh.clear(getSessionId()).catch(() => { /* best effort */ });
+  }
+  setSource(null);
+  refresh();
 }
 
 async function onLocalRefresh() {
@@ -528,12 +786,14 @@ async function onLocalRefresh() {
 }
 
 async function restoreLocalFolder() {
+  // Only auto-restore the handle when the active source is local.
+  if (getSource() !== "local") return;
   const sessionId = getSessionId();
   const handle = await fh.loadStoredHandle(sessionId);
   if (!handle) return;
   const perm = await fh.queryPermission(handle);
   localState = { handle, label: fh.labelFromHandle(handle), lastFingerprint: "" };
-  showLocalRow(true);
+  refresh();
   setLocalName(localState.label);
   if (perm === "granted") {
     setDot("yellow", "Restored — press refresh to parse");
@@ -591,6 +851,7 @@ async function parseScanResult(files) {
   const fp = await fh.fingerprintFiles(files);
   if (localState) localState.lastFingerprint = fp;
   reportParseResult(out, n4lFiles.length, "sstaas-local-dot", performance.now() - t0);
+  driveDefaultToc();
 }
 
 async function parseFromFiles(files) {
