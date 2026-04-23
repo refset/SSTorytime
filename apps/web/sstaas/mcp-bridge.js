@@ -114,6 +114,17 @@ async function dispatch(method, payload) {
       const raw = await wasmSearch(name);
       return typeof raw === "string" ? JSON.parse(raw) : raw;
     }
+    case "uiSearch": {
+      const name = (payload.name ?? "").trim();
+      const input = document.getElementById("name");
+      const button = document.getElementById("gosubmit");
+      if (!input || !button) throw new Error("search UI not mounted");
+      input.value = name;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      button.click();
+      return { ok: true, driven: name };
+    }
     case "ping":
       return { ok: true, at: new Date().toISOString() };
     default:
