@@ -145,7 +145,7 @@ const CONTROLS_HTML = `
   </div>`;
 
 const BUILD_COMMIT_URL = BUILD.commit && BUILD.commit !== "dev"
-  ? `https://github.com/markburgess/SSTorytime/commit/${BUILD.commit}`
+  ? `https://github.com/refset/SSTorytime/commit/${BUILD.commit}`
   : null;
 const BUILD_LABEL = BUILD_COMMIT_URL
   ? `build <a href="${BUILD_COMMIT_URL}" target="_blank" rel="noopener">${BUILD.commit}</a>`
