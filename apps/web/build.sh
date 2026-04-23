@@ -40,6 +40,19 @@ rm -f "$DIST/sstaas/config.local.example.js"
 # Don't ship a local-only override if one happens to exist.
 rm -f "$DIST/sstaas/config.local.js"
 
+echo "Stamping build-info.js with commit sha…"
+BUILD_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+if ! git -C "$PROJECT_ROOT" diff --quiet 2>/dev/null; then
+  BUILD_COMMIT="${BUILD_COMMIT}-dirty"
+fi
+BUILD_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+cat > "$DIST/sstaas/build-info.js" <<EOF
+export const BUILD = {
+  commit: "${BUILD_COMMIT}",
+  builtAt: "${BUILD_AT}",
+};
+EOF
+
 echo "Patching index.html (inject bootstrap script tag)…"
 # Take upstream's index.html and inject:
 #  - an inline synchronous pre-shim that catches any fetch() to our

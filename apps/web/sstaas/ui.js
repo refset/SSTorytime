@@ -19,6 +19,7 @@ import { parseN4L } from "./bridge.js";
 import { getSessionId } from "./session.js";
 import * as fh from "./folder-handle.js";
 import * as mcp from "./mcp-bridge.js";
+import { BUILD } from "./build-info.js";
 
 const TARGET_KEY = "sstaas-github-target";
 const MCP_URL_KEY = "sstaas-mcp-url";
@@ -75,11 +76,19 @@ const CONTROLS_HTML = `
     <span id="sstaas-status" class="sstaas-status"></span>
   </div>`;
 
+const BUILD_COMMIT_URL = BUILD.commit && BUILD.commit !== "dev"
+  ? `https://github.com/markburgess/SSTorytime/commit/${BUILD.commit}`
+  : null;
+const BUILD_LABEL = BUILD_COMMIT_URL
+  ? `build <a href="${BUILD_COMMIT_URL}" target="_blank" rel="noopener">${BUILD.commit}</a>`
+  : `build ${BUILD.commit}`;
+
 const FOOTER_LINKS_HTML = `
   <div id="sstaas-footer-links">
     <a href="#" data-overlay="about">About</a>
     · <a href="#" data-overlay="terms">Terms (v${CONFIG.termsVersion})</a>
     · <a href="#" data-overlay="privacy">Privacy (v${CONFIG.privacyVersion})</a>
+    · <span class="sstaas-build"${BUILD.builtAt ? ` title="built ${BUILD.builtAt}"` : ""}>${BUILD_LABEL}</span>
   </div>`;
 
 const OVERLAY_HTML = `
@@ -151,6 +160,12 @@ const STYLE = `
     border-bottom: 1px dotted #888;
   }
   #sstaas-footer-links a:hover { border-bottom-style: solid; }
+  #sstaas-footer-links .sstaas-build {
+    color: #888; font-family: ui-monospace, Menlo, monospace; font-size: 0.78rem;
+  }
+  #sstaas-footer-links .sstaas-build a {
+    color: inherit; border-bottom: 1px dotted #aaa;
+  }
 
   #sstaas-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.45);
