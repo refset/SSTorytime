@@ -1,41 +1,37 @@
-# Upstream impact of `client-side-drive`
+# Upstream impact of the client-side fork
 
 A summary of what this fork actually changes in Mark's code, vs. what
-lives in new parallel paths. Scope: from the branch base
-(`b09c915` — Mark's last upstream commit at fork time) to current
-`HEAD`.
+lives in new parallel paths.
 
 ## TL;DR
 
-The fork is almost entirely **additive**. One committed edit to an
-upstream Go source file, plus one build-time HTML patch. No upstream
-JS, CSS, schema, or N4L logic was modified.
+The fork is almost entirely **additive**. Two committed edits to
+upstream Go source files, plus one build-time HTML patch (injection +
+absolute-path rewrite). No upstream JS, CSS, schema, or N4L logic was
+modified beyond the build-time text substitutions.
 
 ## Committed source edits to upstream files
 
 ### `pkg/SSTorytime/*.go` — `os.Exit` → `panic` (29 sites across 10 files)
 
 Every `os.Exit(-1)` / `os.Exit(1)` in the committed upstream Go
-sources becomes a `panic(...)`. This is required for the WASM build
-(so `pkg/n4lparse.Parse`'s `defer recover()` can actually catch a
-fatal parse error — `recover()` does not catch `os.Exit`, which was
-tearing down the whole Go runtime on the first malformed line),
-and it is arguably a strict improvement for the native HTTP server
-too: a malformed request now panics up through `net/http`'s
-per-request recover instead of killing the process. Nine files lose
-their now-unused `"os"` import as a consequence; `session.go` keeps
-it for `os.Getenv` / `os.UserHomeDir`. No behaviour change beyond
-the exit vs. panic semantics.
+sources becomes a `panic(...)`. Required for the WASM build so
+`pkg/n4lparse.Parse`'s `defer recover()` can actually catch a fatal
+parse error — `recover()` doesn't catch `os.Exit`, which was tearing
+down the whole Go runtime on the first malformed line. Arguably a
+strict improvement for the native HTTP server too: a malformed
+request now panics up through `net/http`'s per-request recover
+instead of killing the process. Nine files lose their now-unused
+`"os"` import; `session.go` keeps it for `os.Getenv` / `os.UserHomeDir`.
+No behaviour change beyond exit-vs-panic semantics.
 
 ### `pkg/SSTorytime/db_upload.go` — one nil-guard
 
-Function: `UploadPageMapEvent`.
-
-Upstream called `row.Close()` in the error branch of `sst.DB.Query(...)`.
-Under `database/sql`, `Query` returns a nil `*Rows` on error, so
-`row.Close()` segfaulted as soon as a duplicate-key insert landed under
-PGlite. The fix drops the nil deref; the `return` path was already
-correct. One-line behavioural change, no other control flow.
+`UploadPageMapEvent`: upstream called `row.Close()` in the error
+branch of `sst.DB.Query(...)`. Under `database/sql`, `Query` returns
+a nil `*Rows` on error, so `row.Close()` segfaulted as soon as a
+duplicate-key insert landed under PGlite. One-line behavioural change,
+no other control flow.
 
 ```diff
 -		row.Close()
@@ -44,72 +40,71 @@ correct. One-line behavioural change, no other control flow.
  		return
 ```
 
-This is the **only** upstream `.go` / `.js` / `.css` file modified in
-a committed diff.
+### `pkg/n4lparse/api.go` — optional progress callback
+
+`ParseWithConfigs` grew a fourth parameter, a `ProgressFn` callback
+that's invoked before each config-load and each per-file parse stage.
+Callers pass `nil` to opt out; the single other call site in the
+package (`Parse`) does exactly that. Additive: default behaviour is
+unchanged.
 
 ## Build-time HTML patch (not a committed source edit)
 
 `apps/web/build.sh` copies `src/server/public/` into `dist/` verbatim,
-then patches `dist/index.html` to inject three tags before `</head>`:
+then applies two text transforms to `dist/index.html`:
 
-1. An inline synchronous **pre-shim** that parks calls to `/searchN4L`,
-   `/SearchAssets`, `/Upload` on a Promise until the real shim is
-   installed (needed because upstream `main.js`'s DOMContentLoaded
-   handler can race the bootstrap module graph).
-2. The **Google Identity Services** loader (for Drive auth).
-3. The bootstrap ES module (`/sstaas/bootstrap.js`).
+1. **Injection before `</head>`**: an inline synchronous pre-shim
+   that parks calls to `/searchN4L`, `/SearchAssets`, `/Upload` on a
+   Promise until the real shim is installed, and the bootstrap ES
+   module (`sstaas/bootstrap.js`).
+2. **Absolute-to-relative rewrite**: `href="/foo"` / `src="/foo"` →
+   `href="foo"` / `src="foo"`, so favicons, CSS, and `main.js` resolve
+   under the `/SSTorytime/` Pages subpath. External `https://...`
+   refs are left alone.
 
-Upstream `index.html` on disk is never rewritten. The patch lives
-entirely in the heredoc inside `build.sh`.
+`dist/main.js` also gets a one-line sed applied: upstream's theme
+switcher hard-codes absolute CSS hrefs (`/dark.css` etc), so the
+leading slash is stripped. Source `main.js` on disk is never touched.
 
 ## What is *not* modified
 
-- `src/server/public/main.js` — untouched. The fetch shim and the
-  loading splash sit in front of it, not inside it. All UI behaviour
-  (orbit panels, sequence, TOC, search history, theme) is upstream's
-  code running unmodified against our shimmed fetch responses.
-- `src/server/public/*.css`, `*.html` (aside from the build-time
-  `index.html` injection above), assets — untouched.
-- `src/server/http_server.go` — unused in this build target. A few
-  helpers that lived there (`PackageConeFromOrigin`) had to be
-  **copied** (not moved) into `cmd/wasm/main.go` because upstream's
-  server path still needs them.
-- `pkg/SSTorytime/*.go` — every other file untouched. The WASM path
-  consumes upstream's `Configure`, `GraphToDB`, `HandleOrbit`-style
-  helpers, `SolveNodePtrs`, `GetNodeOrbit`, `DecodeSearchField`,
-  `GetSequenceContainers`, `GetPathsAndSymmetries`,
-  `BetweenNessCentrality`, `SuperNodes`, `GetDBPageMap`, `JSONPage`,
-  `GetLastSawSection`/`NPtr`, `GetDBArrowBy{Ptr,STType}`,
-  `STIndexToSTType`, `GetFwdPathsAsLinks`, `LinkWebPaths`, etc.
-  exactly as Mark wrote them.
+- `src/server/public/main.js` — untouched on disk. The fetch shim and
+  the loading splash sit in front of it, not inside it. All UI
+  behaviour (orbit panels, sequence, TOC, search history, theme) is
+  upstream's code running unmodified against our shimmed responses.
+- `src/server/public/*.css`, `*.html`, assets — untouched.
+- `src/server/http_server.go` — unused in this build target.
+  `PackageConeFromOrigin` and a few other helpers were **copied**
+  (not moved) into `cmd/wasm/main.go`.
+- `pkg/SSTorytime/*.go` — every file beyond the `os.Exit` conversion
+  and the `db_upload.go` nil-guard is untouched. The WASM path
+  consumes upstream's `Configure`, `GraphToDB`, `HandleOrbit` helpers,
+  `SolveNodePtrs`, `GetNodeOrbit`, `DecodeSearchField`, etc. as-is.
 - The N4L parser in `src/N4L/` — untouched. `pkg/n4lparse/` is a
-  **library extraction** (new files, not edits) of that code so the
-  WASM binary can link it without depending on `src/N4L`'s `main`
-  package.
+  **library extraction** of that code.
 - The Postgres schema, the arrow directory files, the example `.n4l`
   corpus — untouched.
 
 ## Everything else is new, parallel code
 
-All under new top-level paths so nothing shadows upstream:
+All under new top-level paths:
 
 | Path | What it adds |
 |---|---|
-| `apps/web/build.sh` | builds `dist/` from upstream `public/` + our overlay |
-| `apps/web/sstaas/` | JS modules: bootstrap, fetch shim, PGlite + schema, WASM bridge, GIS auth, Drive REST, re-index orchestrator, asset cache, UI injection, splash, legal copy |
+| `apps/web/build.sh` | builds `dist/` from upstream `public/` + our overlay, patches index.html, rewrites absolute paths |
+| `apps/web/sstaas/` | JS modules: bootstrap, fetch shim (+spinner), PGlite + schema, WASM bridge, GitHub PAT auth, GitHub Contents API helpers, re-index orchestrator, local-folder support (FSAA + webkitdirectory), UI injection, splash, legal copy |
 | `cmd/wasm/main.go` | Go→WASM entry; exposes `open/parseN4L/search/nodeCount` on `window.__sstWasm`; mirrors `HandleSearch` dispatch |
 | `internal/pgtext/` | pure-Go Postgres composite/array literal codec (standalone, unit-tested) |
 | `pkg/SSTorytime/driver_pglite_js.go` | `database/sql` driver that bridges to PGlite via `window.__sstQuery`. `//go:build js && wasm` |
 | `pkg/SSTorytime/session_wasm.go` | `OpenWasm()` — `Open()` for the WASM build; native `Open()` untouched |
 | `pkg/SSTorytime/unaccent_wasm.go` | NFD-based `unaccent(text)` shim (PGlite lacks the extension) |
 | `pkg/n4lparse/` | library extraction of `src/N4L` parser + embedded default config |
-| `.github/workflows/pages.yml` | GitHub Pages build + deploy |
-| `infra/gcp/` | Terraform: enable Drive API + manual-step checklist |
+| `.github/workflows/pages.yml` | GitHub Pages build + deploy (no secrets) |
 | `ROADMAP_CLIENT_SIDE.md` | honest status + remaining work |
 
 ## Interaction pattern
 
-Nothing in upstream is patched at runtime either. The shape is:
+Nothing in upstream is patched at runtime. The shape is:
 
 ```
 upstream main.js  ──fetch("/searchN4L")──▶  fetch-shim.js
@@ -130,9 +125,16 @@ from Mark's Go HTTP server, so every panel renders from unmodified
 
 ## Upstreamability
 
-The one committed upstream edit (`db_upload.go` nil-guard) is a
-straightforward defensive fix and would apply to Mark's native build
-too — the nil `*Rows` contract is part of `database/sql`. Everything
-else is parallel code, so rebasing onto future upstream commits should
-be a clean fast-forward on upstream paths with merge activity confined
-to the new directories.
+- `db_upload.go` nil-guard: straightforward defensive fix, applies to
+  Mark's native build too — the nil `*Rows` contract is part of
+  `database/sql`.
+- `os.Exit` → `panic` conversion: upstream-friendly since the HTTP
+  server currently dies on any fatal parse error; panicking through
+  `net/http`'s per-request recover is strictly better. Downside is
+  the 29-site churn.
+- `ParseWithConfigs` progress callback: additive API extension;
+  existing callers pass nil or use the no-progress convenience
+  wrapper, so it's a drop-in.
+
+Everything else is parallel code under new paths, so rebasing onto
+future upstream commits should fast-forward cleanly.
