@@ -65,7 +65,7 @@ type FileError struct {
 // Parse: embedded configs + user files. See ParseWithConfigs for the
 // form that also accepts user-supplied SSTconfig/*.sst definitions.
 func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) {
-	return ParseWithConfigs(sst, nil, userFiles)
+	return ParseWithConfigs(sst, nil, userFiles, nil)
 }
 
 // ParseWithConfigs loads the embedded default configs, then any
@@ -75,7 +75,12 @@ func Parse(sst *SST.PoSST, userFiles map[string]string) (res Result, err error) 
 // CompleteInferences. Any panic in a user file is caught per-file
 // and recorded as a FileError; the panic text comes from the real
 // ParseError message, not the generic panic sentinel.
-func ParseWithConfigs(sst *SST.PoSST, userConfigs, userFiles map[string]string) (res Result, err error) {
+// ProgressFn is called once per stage with a human-readable stage
+// name; for the per-file stage, `name` is the current file and
+// (i, total) is the 1-based index. Pass nil to disable.
+type ProgressFn func(stage, name string, i, total int)
+
+func ParseWithConfigs(sst *SST.PoSST, userConfigs, userFiles map[string]string, progress ProgressFn) (res Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("n4lparse: %v (line %d in %q)", r, LINE_NUM, CURRENT_FILE)
@@ -95,7 +100,10 @@ func ParseWithConfigs(sst *SST.PoSST, userConfigs, userFiles map[string]string) 
 	// lose, leaving nodes to fail with "no such arrow".
 	useEmbedded := len(userConfigs) == 0
 	if useEmbedded {
-		for _, name := range configOrder {
+		for i, name := range configOrder {
+			if progress != nil {
+				progress("config", name, i+1, len(configOrder))
+			}
 			data, readErr := embeddedConfigs.ReadFile("embeddedconfig/" + name)
 			if readErr != nil {
 				return res, fmt.Errorf("n4lparse: embedded config %q missing: %w", name, readErr)
@@ -149,7 +157,10 @@ func ParseWithConfigs(sst *SST.PoSST, userConfigs, userFiles map[string]string) 
 		}
 		return configNames[i] < configNames[j]
 	})
-	for _, name := range configNames {
+	for i, name := range configNames {
+		if progress != nil {
+			progress("config", name, i+1, len(configNames))
+		}
 		resetParserState(name)
 		ParseConfig(sst, []rune(userConfigs[name]))
 	}
@@ -164,7 +175,10 @@ func ParseWithConfigs(sst *SST.PoSST, userConfigs, userFiles map[string]string) 
 	sort.Strings(names)
 
 	tFiles := time.Now()
-	for _, name := range names {
+	for i, name := range names {
+		if progress != nil {
+			progress("parse", name, i+1, len(names))
+		}
 		if fe := parseOneFile(sst, name, userFiles[name]); fe != nil {
 			res.Errors = append(res.Errors, *fe)
 			continue
@@ -174,6 +188,9 @@ func ParseWithConfigs(sst *SST.PoSST, userConfigs, userFiles map[string]string) 
 	res.FilesMs = time.Since(tFiles).Milliseconds()
 
 	// 3. Post-process (NEAR cliques, etc).
+	if progress != nil {
+		progress("infer", "", 0, 0)
+	}
 	tInfer := time.Now()
 	CompleteInferences(sst)
 	res.InferMs = time.Since(tInfer).Milliseconds()

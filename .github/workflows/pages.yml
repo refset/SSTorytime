@@ -1,10 +1,6 @@
 # Build the WASM module + assemble the SPA dist/, then publish to
-# GitHub Pages. The OAuth client ID is injected from a repo *variable*
-# (not a secret — the client ID is public, but kept out of git so
-# forks can use their own).
-#
-# Repo settings → Variables → New variable:
-#   GOOGLE_OAUTH_CLIENT_ID = 1234567890-xxx.apps.googleusercontent.com
+# GitHub Pages. GitHub auth is done by pasting a personal access token
+# at runtime, so there are no secrets to inject at build time.
 #
 # Pages → Source: GitHub Actions
 
@@ -12,7 +8,7 @@ name: Deploy SPA to GitHub Pages
 
 on:
   push:
-    branches: [client-side-drive]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -36,17 +32,6 @@ jobs:
 
       - name: Build dist/
         run: sh apps/web/build.sh
-
-      - name: Inject OAuth client ID
-        env:
-          OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
-        run: |
-          if [ -z "$OAUTH_CLIENT_ID" ]; then
-            echo "::warning::GOOGLE_OAUTH_CLIENT_ID variable not set; sign-in won't work."
-          else
-            sed -i "s|REPLACE_WITH_OAUTH_CLIENT_ID.apps.googleusercontent.com|$OAUTH_CLIENT_ID|g" \
-              dist/sstaas/config.js
-          fi
 
       - uses: actions/upload-pages-artifact@v3
         with:

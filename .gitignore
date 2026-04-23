@@ -94,5 +94,6 @@ conceptualize
 
 # client-side-drive build outputs
 /dist/
+/wasm
 *.wasm
 apps/web/sstaas/config.local.js

@@ -3,38 +3,53 @@
 // untouched and easy to merge with future upstream changes.
 //
 // What we add:
-//  1. A small controls bar in <header> with Sign-in / Pick-folder /
-//     Re-index buttons and a status line.
+//  1. A small controls bar in <header> with GitHub sign-in + a target
+//     form (owner/repo/branch/path), a re-index button, plus the
+//     local-folder alternative.
 //  2. Footer links: About / Privacy / Terms (with version stamps).
-//  3. A modal overlay container used by those footer links.
-//  4. An assets list panel (hidden until a folder is picked) showing
-//     each Drive asset with a "keep offline" checkbox.
+//  3. A modal overlay container used by footer links and the GitHub
+//     device-flow prompt.
 
 import { CONFIG } from "./config.js";
-import { initAuth, signIn, signOut, isSignedIn, onAuthChange } from "./auth.js";
-import * as drive from "./drive.js";
-import * as assets from "./assets.js";
-import { reindex, setKeepOffline } from "./reindex.js";
+import {
+  initAuth, signInWithToken, signOut, isSignedIn, onAuthChange, getUser,
+} from "./auth.js";
+import { reindex } from "./reindex.js";
 import { parseN4L } from "./bridge.js";
 import { getSessionId } from "./session.js";
 import * as fh from "./folder-handle.js";
 
-const FOLDER_KEY = "sstaas-drive-folder-id";
+const TARGET_KEY = "sstaas-github-target";
 const POLL_MS = 30_000;
 
 // ---- Markup injection ----
 
 const CONTROLS_HTML = `
   <div id="sstaas-controls">
-    <button id="sstaas-signin" class="sstaas-btn">Sign in with Google</button>
+    <button id="sstaas-signin" class="sstaas-btn">Sign in with GitHub</button>
     <button id="sstaas-signout" class="sstaas-btn" hidden>Sign out</button>
-    <button id="sstaas-pick-folder" class="sstaas-btn" hidden>Choose Drive folder</button>
-    <code id="sstaas-folder" class="sstaas-folder" hidden></code>
-    <button id="sstaas-reindex" class="sstaas-btn primary" hidden>Re-index</button>
+
+    <span id="sstaas-gh-who" class="sstaas-who" hidden></span>
+
+    <span id="sstaas-gh-form" class="sstaas-gh-form" hidden>
+      <input id="sstaas-gh-owner" class="sstaas-input" placeholder="owner" size="12" value="markburgess">
+      <span class="sstaas-sep">/</span>
+      <input id="sstaas-gh-repo" class="sstaas-input" placeholder="repo" size="14" value="SSTorytime">
+      <input id="sstaas-gh-branch" class="sstaas-input" placeholder="branch (opt)" size="10" value="main">
+      <input id="sstaas-gh-path" class="sstaas-input" placeholder="path (opt)" size="10" value="examples">
+      <button id="sstaas-gh-load" class="sstaas-btn primary">Load</button>
+    </span>
+
+    <span id="sstaas-gh-row" class="sstaas-local-row" hidden>
+      <span id="sstaas-gh-dot" class="sstaas-dot" title=""></span>
+      <code id="sstaas-gh-label" class="sstaas-folder"></code>
+      <button id="sstaas-reindex" class="sstaas-icon-btn" title="Re-list + re-fetch + re-parse">⟳</button>
+      <button id="sstaas-gh-change" class="sstaas-icon-btn" title="Pick a different target">✎</button>
+    </span>
 
     <!-- Local-folder binding. One of these two is visible at a time:
          the pick button, or the picked-folder row. -->
-    <button id="sstaas-local-pick" class="sstaas-btn" title="Pick a local directory; every .n4l inside is parsed. No Drive required.">Open local n4l directory</button>
+    <button id="sstaas-local-pick" class="sstaas-btn" title="Pick a local directory; every .n4l inside is parsed. No GitHub required.">Open local n4l directory</button>
     <input id="sstaas-local-fallback" type="file" webkitdirectory directory multiple hidden>
 
     <span id="sstaas-local-row" class="sstaas-local-row" hidden>
@@ -61,16 +76,6 @@ const OVERLAY_HTML = `
     </div>
   </div>`;
 
-const ASSETS_HTML = `
-  <aside id="sstaas-assets" hidden>
-    <div class="sstaas-assets-header">
-      <strong>Drive assets</strong>
-      <span id="sstaas-assets-summary"></span>
-      <button id="sstaas-assets-close" aria-label="Hide">×</button>
-    </div>
-    <div id="sstaas-assets-list"></div>
-  </aside>`;
-
 const STYLE = `
   #sstaas-controls {
     display: flex; gap: 0.4rem; align-items: center;
@@ -87,10 +92,17 @@ const STYLE = `
   .sstaas-btn.primary { border-color: #4a86c8; color: #1c4577; }
   .sstaas-folder {
     background: #eef; padding: 0.1rem 0.4rem; border-radius: 3px;
-    font-size: 0.78rem; word-break: break-all; max-width: 28ch;
+    font-size: 0.78rem; word-break: break-all; max-width: 36ch;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .sstaas-status { color: #555; font-size: 0.82rem; min-width: 12rem; }
+  .sstaas-status { color: #555; font-size: 0.82rem; min-width: 12rem; white-space: pre-line; }
+  .sstaas-who { color: #555; font-size: 0.82rem; }
+  .sstaas-gh-form { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .sstaas-input {
+    padding: 0.2rem 0.35rem; border: 1px solid #c8c8c4; border-radius: 3px;
+    font-size: 0.82rem; background: #fff; color: inherit;
+  }
+  .sstaas-sep { color: #888; }
 
   .sstaas-local-row {
     display: inline-flex; align-items: center; gap: 0.35rem;
@@ -141,37 +153,6 @@ const STYLE = `
   #sstaas-overlay-body code {
     background: #eee; padding: 0.05rem 0.3rem; border-radius: 3px;
   }
-
-  #sstaas-assets {
-    position: fixed; bottom: 0; right: 0; width: min(360px, 100vw);
-    max-height: 50vh; background: #fff; border-top: 1px solid #ccc;
-    border-left: 1px solid #ccc; box-shadow: -2px -2px 8px rgba(0,0,0,0.1);
-    overflow: auto; z-index: 500; font-size: 0.85rem;
-  }
-  .sstaas-assets-header {
-    display: flex; align-items: center; gap: 0.4rem;
-    padding: 0.4rem 0.6rem; border-bottom: 1px solid #eee; background: #fafaf7;
-    position: sticky; top: 0;
-  }
-  .sstaas-assets-header span { color: #888; font-size: 0.78rem; margin-left: auto; }
-  #sstaas-assets-close {
-    background: transparent; border: 0; font-size: 1.1rem;
-    cursor: pointer; color: #888; margin-left: 0.4rem;
-  }
-  #sstaas-assets-list { padding: 0.3rem 0.6rem; }
-  .sstaas-asset-row {
-    display: grid; grid-template-columns: 1fr auto auto;
-    align-items: center; gap: 0.4rem;
-    padding: 0.2rem 0.3rem; border-radius: 3px;
-  }
-  .sstaas-asset-row:hover { background: #f6f6f2; }
-  .sstaas-asset-row.archived { opacity: 0.55; }
-  .sstaas-asset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sstaas-asset-size { font-size: 0.75rem; color: #888; font-variant-numeric: tabular-nums; }
-  .sstaas-asset-keep { display: inline-flex; align-items: center; gap: 0.25rem;
-    font-size: 0.75rem; color: #555; cursor: pointer; }
-  .sstaas-asset-keep input { margin: 0; }
-  .sstaas-placeholder { color: #888; font-style: italic; }
 `;
 
 // ---- Lifecycle ----
@@ -185,20 +166,15 @@ export async function injectUI({ isBridgeReady } = {}) {
   styleEl.textContent = STYLE;
   document.head.appendChild(styleEl);
 
-  // Insert controls bar at the very top of <body> (before <page>).
   const page = document.querySelector("page");
   if (page) page.insertAdjacentHTML("beforebegin", CONTROLS_HTML);
   else document.body.insertAdjacentHTML("afterbegin", CONTROLS_HTML);
 
-  // Footer links: append into the existing footer.
   const footer = document.querySelector("footer");
   if (footer) footer.insertAdjacentHTML("beforeend", FOOTER_LINKS_HTML);
 
-  // Overlay + assets panel live at end of body.
   document.body.insertAdjacentHTML("beforeend", OVERLAY_HTML);
-  document.body.insertAdjacentHTML("beforeend", ASSETS_HTML);
 
-  // Overlay click handlers.
   document.querySelectorAll("[data-overlay]").forEach((a) =>
     a.addEventListener("click", (e) => { e.preventDefault(); showOverlay(a.dataset.overlay); })
   );
@@ -210,33 +186,21 @@ export async function injectUI({ isBridgeReady } = {}) {
     if (e.key === "Escape" && !document.getElementById("sstaas-overlay").hidden) hideOverlay();
   });
 
-  // Assets panel close.
-  document.getElementById("sstaas-assets-close").addEventListener("click", () => {
-    document.getElementById("sstaas-assets").setAttribute("hidden", "");
-  });
+  await initAuth();
 
-  // Drive controls.
-  try { await initAuth(); }
-  catch (err) {
-    console.warn("auth init skipped:", err.message);
-    setStatus("Sign-in unavailable (no OAuth client ID configured)");
-  }
-
-  document.getElementById("sstaas-signin").addEventListener("click", () => signIn());
+  document.getElementById("sstaas-signin").addEventListener("click", onSignIn);
   document.getElementById("sstaas-signout").addEventListener("click", () => {
     signOut();
-    localStorage.removeItem(FOLDER_KEY);
+    localStorage.removeItem(TARGET_KEY);
     refresh();
   });
-  document.getElementById("sstaas-pick-folder").addEventListener("click", async () => {
-    const id = await drive.pickFolderManual();
-    if (!id) return;
-    localStorage.setItem(FOLDER_KEY, id);
+  document.getElementById("sstaas-gh-load").addEventListener("click", onLoadTarget);
+  document.getElementById("sstaas-gh-change").addEventListener("click", () => {
+    localStorage.removeItem(TARGET_KEY);
     refresh();
   });
   document.getElementById("sstaas-reindex").addEventListener("click", () => runReindex());
 
-  // Local folder bindings.
   document.getElementById("sstaas-local-pick").addEventListener("click", onLocalPick);
   document.getElementById("sstaas-local-fallback").addEventListener("change", (e) => {
     const input = e.target;
@@ -249,26 +213,139 @@ export async function injectUI({ isBridgeReady } = {}) {
   onAuthChange(refresh);
   refresh();
 
-  // Try to restore a previously-bound folder for this session.
   restoreLocalFolder().catch((e) => console.warn("restore folder:", e.message));
-  // Poll to turn the dot yellow when files on disk change.
   setInterval(() => pollForChanges().catch(() => {}), POLL_MS);
 }
 
+// ---- GitHub flow ----
+
+function loadTarget() {
+  try { return JSON.parse(localStorage.getItem(TARGET_KEY) ?? "null"); }
+  catch { return null; }
+}
+
+function onSignIn() {
+  const tokenUrl = "https://github.com/settings/personal-access-tokens/new";
+  showOverlayHTML(
+    `<h1>Sign in with a GitHub token</h1>
+     <p>GitHub's OAuth endpoints don't support CORS, so pure-browser apps
+        like this one authenticate with a personal access token instead.</p>
+     <ol>
+       <li>Open <a href="${tokenUrl}" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>.</li>
+       <li>Give it a short expiry (7–30 days is plenty).</li>
+       <li>Under <em>Repository access</em>, pick the specific repos this app should read.</li>
+       <li>Under <em>Repository permissions</em>, grant <code>Contents: Read-only</code>.</li>
+       <li>Generate, copy, and paste the token below.</li>
+     </ol>
+     <p>The token is stored only in your browser's localStorage. Sign out to delete it.</p>
+     <textarea id="sstaas-gh-token-input" rows="3"
+               style="width:100%; box-sizing:border-box; font-family: ui-monospace, monospace; font-size: 0.85rem; padding: 0.4rem;"
+               placeholder="github_pat_…"></textarea>
+     <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
+       <button id="sstaas-gh-token-save" class="sstaas-btn primary">Save token</button>
+       <span id="sstaas-gh-token-msg" style="color: #b33030; font-size: 0.85rem;"></span>
+     </div>`
+  );
+  const input = document.getElementById("sstaas-gh-token-input");
+  const msg   = document.getElementById("sstaas-gh-token-msg");
+  const btn   = document.getElementById("sstaas-gh-token-save");
+  input.focus();
+  const submit = async () => {
+    btn.disabled = true;
+    msg.textContent = "";
+    try {
+      const user = await signInWithToken(input.value);
+      hideOverlay();
+      setStatus(`Signed in to GitHub as @${user.login}.`);
+    } catch (err) {
+      msg.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  btn.addEventListener("click", submit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+  });
+}
+
+async function onLoadTarget() {
+  const owner  = document.getElementById("sstaas-gh-owner").value.trim();
+  const repo   = document.getElementById("sstaas-gh-repo").value.trim();
+  const branch = document.getElementById("sstaas-gh-branch").value.trim() || null;
+  const path   = document.getElementById("sstaas-gh-path").value.trim() || null;
+  if (!owner || !repo) { setStatus("Owner and repo are required."); return; }
+  const target = { owner, repo, branch, path };
+  localStorage.setItem(TARGET_KEY, JSON.stringify(target));
+  refresh();
+  setDot("yellow", "Target loaded — press ⟳ to index", "sstaas-gh-dot");
+  await runReindex();
+}
+
+async function runReindex() {
+  if (!isBridgeReadyRef()) { alert("PGlite/WASM still loading."); return; }
+  const target = loadTarget();
+  if (!target) return;
+  const btn = document.getElementById("sstaas-reindex");
+  btn.disabled = true;
+  setDot("yellow", "Re-indexing…", "sstaas-gh-dot");
+  const t0 = performance.now();
+  try {
+    const { out, fileCount, branch } = await reindex(target, {
+      onProgress: ({ message }) => setStatus(message),
+    });
+    if (branch && !target.branch) {
+      target.branch = branch;
+      localStorage.setItem(TARGET_KEY, JSON.stringify(target));
+      refresh();
+    }
+    if (fileCount === 0) {
+      setDot("red", "No .n4l files at that path", "sstaas-gh-dot");
+      return;
+    }
+    reportParseResult(out, fileCount, "sstaas-gh-dot", performance.now() - t0);
+  } catch (err) {
+    console.error("reindex failed", err);
+    setDot("red", "Error: " + err.message, "sstaas-gh-dot");
+    setStatus("Re-index failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function targetLabel(t) {
+  return `${t.owner}/${t.repo}${t.branch ? `@${t.branch}` : ""}${t.path ? `:${t.path}` : ""}`;
+}
+
+async function refreshGitHubWho() {
+  const who = document.getElementById("sstaas-gh-who");
+  if (!who) return;
+  if (!isSignedIn()) { who.textContent = ""; return; }
+  try {
+    const u = await getUser();
+    who.textContent = u ? `@${u.login}` : "";
+  } catch (err) {
+    who.textContent = "";
+    console.warn("github user fetch:", err.message);
+  }
+}
+
+// ---- Shared ----
+
 function refresh() {
   const signedIn = isSignedIn();
-  const folder = localStorage.getItem(FOLDER_KEY);
+  const target = loadTarget();
   show("sstaas-signin", !signedIn);
   show("sstaas-signout", signedIn);
-  show("sstaas-pick-folder", signedIn && !folder);
-  show("sstaas-reindex", signedIn && !!folder);
-  const fEl = document.getElementById("sstaas-folder");
-  if (fEl) {
-    if (folder) { fEl.textContent = folder; fEl.removeAttribute("hidden"); }
-    else fEl.setAttribute("hidden", "");
+  show("sstaas-gh-who", signedIn);
+  show("sstaas-gh-form", signedIn && !target);
+  show("sstaas-gh-row", signedIn && !!target);
+  const fEl = document.getElementById("sstaas-gh-label");
+  if (fEl && target) {
+    fEl.textContent = targetLabel(target);
+    fEl.title = targetLabel(target);
   }
-  if (signedIn && folder) refreshAssetsPanel(folder).catch((e) => console.warn("assets:", e.message));
-  else show("sstaas-assets", false);
+  if (signedIn) refreshGitHubWho();
 }
 
 function show(id, on) {
@@ -283,26 +360,54 @@ function setStatus(t) {
   if (el) el.textContent = t;
 }
 
+function fmtDuration(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s - m * 60);
+  return `${m}m${rem}s`;
+}
+
+function setDot(kind, tooltip, dotId = "sstaas-local-dot") {
+  const dot = document.getElementById(dotId);
+  if (!dot) return;
+  dot.classList.remove("green", "yellow", "red");
+  if (kind) dot.classList.add(kind);
+  dot.title = tooltip ?? "";
+}
+
+function reportParseResult(out, fileCount, dotId, elapsedMs) {
+  const errs = out?.errors ?? [];
+  const dotColor = errs.length ? "yellow" : "green";
+  const dotMsg = errs.length
+    ? `Parsed ${out.parsed?.length ?? 0}/${fileCount} (${errs.length} failed) at ${new Date().toLocaleTimeString()}`
+    : `Parsed ${fileCount} file(s) at ${new Date().toLocaleTimeString()}`;
+  setDot(dotColor, dotMsg, dotId);
+  const nodeTotal =
+    (out?.n1Directory ?? 0) + (out?.n2Directory ?? 0) + (out?.n3Directory ?? 0) +
+    (out?.lt128 ?? 0) + (out?.lt1024 ?? 0) + (out?.gt1024 ?? 0);
+  const timing = elapsedMs != null ? ` (${fmtDuration(elapsedMs)})` : "";
+  let status = `Parsed ${out?.parsed?.length ?? 0} file(s). Nodes: ${nodeTotal}, arrows: ${out?.arrowTotal ?? 0}${timing}.`;
+  if (errs.length) {
+    const lines = errs.slice(0, 5).map((e) => `  • ${e.File} (line ${e.Line}): ${e.Err}`);
+    if (errs.length > 5) lines.push(`  • …and ${errs.length - 5} more`);
+    status += ` Failed files:\n` + lines.join("\n");
+    console.warn("[sstaas parse]", errs);
+  }
+  setStatus(status);
+}
+
 // ---- Local folder state ----
 //
 // One of these is live at a time for a given session:
 //   { handle, label, lastFingerprint }   (FSAA path — survives reloads)
 //   { label, files, lastFingerprint }    (webkitdirectory fallback — in-memory only)
-// lastFingerprint is whatever the folder looked like AT THE TIME of
-// the last successful parse, so pollForChanges can decide fresh vs stale.
 let localState = null;
 
 function showLocalRow(on) {
   show("sstaas-local-pick", !on);
   show("sstaas-local-row", on);
-}
-
-function setDot(kind, tooltip) {
-  const dot = document.getElementById("sstaas-local-dot");
-  if (!dot) return;
-  dot.classList.remove("green", "yellow", "red");
-  if (kind) dot.classList.add(kind);
-  dot.title = tooltip ?? "";
 }
 
 function setLocalName(label) {
@@ -317,15 +422,11 @@ async function onLocalPick() {
     try {
       handle = await fh.openPicker();
     } catch (err) {
-      // User cancelled the picker — don't treat it as an error.
       if (err && err.name === "AbortError") return;
       console.error(err);
       setStatus("Folder pick failed: " + err.message);
       return;
     }
-    // Persist the handle. Swallow errors (some environments can't
-    // structured-clone a given handle, or have IDB disabled); the
-    // in-session binding still works either way.
     try { await fh.store(getSessionId(), handle); }
     catch (err) { console.warn("[sstaas] couldn't persist folder handle:", err.message); }
     localState = { handle, label: fh.labelFromHandle(handle), lastFingerprint: "" };
@@ -334,7 +435,6 @@ async function onLocalPick() {
     setDot("yellow", "Newly picked — press refresh to parse");
     await parseFromHandle();
   } else {
-    // Fallback: trigger the <input webkitdirectory> picker.
     document.getElementById("sstaas-local-fallback").click();
   }
 }
@@ -353,8 +453,6 @@ async function onLocalRefresh() {
   if (localState.handle) {
     await parseFromHandle();
   } else if (localState.files) {
-    // In the webkitdirectory fallback we can't re-walk without a
-    // fresh pick — the File objects we captured are static.
     await parseFromFiles(localState.files);
   }
 }
@@ -369,9 +467,6 @@ async function restoreLocalFolder() {
   setLocalName(localState.label);
   if (perm === "granted") {
     setDot("yellow", "Restored — press refresh to parse");
-    // Note: cannot auto-parse on load, because the graph lives in
-    // PGlite and PGlite is in-memory — re-parsing is still needed
-    // each time the tab opens. User presses refresh to populate.
   } else {
     setDot("red", "Permission needed — press refresh to re-grant");
   }
@@ -402,8 +497,6 @@ async function parseFromHandle() {
   }
 }
 
-// Shared path: takes either an FSAA scan result or a webkitdirectory
-// File[] (wrapped as {name, path, file}) and runs parseN4L over it.
 async function parseScanResult(files) {
   const n4lFiles = files.filter((f) => (f.kind ?? "n4l") === "n4l");
   const cfgFiles = files.filter((f) => f.kind === "config");
@@ -421,24 +514,13 @@ async function parseScanResult(files) {
   const configs = {};
   for (const f of cfgFiles) configs[f.path] = await f.file.text();
   setStatus(`Parsing ${n4lFiles.length} file(s) — this takes a few seconds per file…`);
-  const out = await parseN4L(payload, cfgFiles.length ? configs : undefined);
+  const t0 = performance.now();
+  const out = await parseN4L(payload, cfgFiles.length ? configs : undefined, {
+    onProgress: (msg) => setStatus(msg),
+  });
   const fp = await fh.fingerprintFiles(files);
   if (localState) localState.lastFingerprint = fp;
-  const errs = out.errors ?? [];
-  const dotColor = errs.length ? "yellow" : "green";
-  const dotMsg = errs.length
-    ? `Parsed ${out.parsed?.length ?? 0}/${n4lFiles.length} (${errs.length} failed) at ${new Date().toLocaleTimeString()}`
-    : `Parsed ${n4lFiles.length} file(s) at ${new Date().toLocaleTimeString()}`;
-  setDot(dotColor, dotMsg);
-  const nodeTotal = out.n1Directory + out.n2Directory + out.n3Directory + out.lt128 + out.lt1024 + out.gt1024;
-  let status = `Parsed ${out.parsed?.length ?? 0} file(s). Nodes: ${nodeTotal}, arrows: ${out.arrowTotal}.`;
-  if (errs.length) {
-    const lines = errs.slice(0, 5).map((e) => `  • ${e.File} (line ${e.Line}): ${e.Err}`);
-    if (errs.length > 5) lines.push(`  • …and ${errs.length - 5} more`);
-    status += ` Failed files:\n` + lines.join("\n");
-    console.warn("[sstaas parse]", errs);
-  }
-  setStatus(status);
+  reportParseResult(out, n4lFiles.length, "sstaas-local-dot", performance.now() - t0);
 }
 
 async function parseFromFiles(files) {
@@ -464,12 +546,10 @@ async function parseFromFiles(files) {
   }
 }
 
-// Polled by setInterval. Only meaningful on the FSAA path (the
-// webkitdirectory fallback can't rescan without a fresh user pick).
 async function pollForChanges() {
   if (!localState?.handle || !localState.lastFingerprint) return;
   const perm = await fh.queryPermission(localState.handle);
-  if (perm !== "granted") return; // don't surprise-prompt the user from a timer
+  if (perm !== "granted") return;
   const files = await fh.scan(localState.handle);
   const fp = await fh.fingerprintFiles(files);
   const dot = document.getElementById("sstaas-local-dot");
@@ -477,33 +557,11 @@ async function pollForChanges() {
   if (fp !== localState.lastFingerprint) {
     setDot("yellow", "Files changed on disk since last parse — press refresh");
   } else if (!dot.classList.contains("green")) {
-    // Don't flip back to green if we're in an error state.
     if (!dot.classList.contains("red")) setDot("green", "Up to date");
   }
 }
 
-async function runReindex() {
-  if (!isBridgeReadyRef()) { alert("PGlite/WASM still loading."); return; }
-  const folder = localStorage.getItem(FOLDER_KEY);
-  if (!folder) return;
-  const btn = document.getElementById("sstaas-reindex");
-  btn.disabled = true;
-  try {
-    const out = await reindex(folder, { onProgress: ({ message }) => setStatus(message) });
-    setStatus(
-      `Done. fetched=${out.fetched} active=${out.activeFiles} archived=${out.archivedFiles}` +
-      (out.parser ? ` (parser: ${out.parser.note ?? "ok"})` : "")
-    );
-    await refreshAssetsPanel(folder);
-  } catch (err) {
-    console.error("reindex failed", err);
-    setStatus("Re-index failed: " + err.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-// ---- Overlay (legal pages) ----
+// ---- Overlay (legal pages + device-flow prompt) ----
 
 const overlayCache = {};
 async function showOverlay(name) {
@@ -522,91 +580,13 @@ async function showOverlay(name) {
     body.innerHTML = `<p>Failed to load: ${err.message}</p>`;
   }
 }
+function showOverlayHTML(html) {
+  const ov = document.getElementById("sstaas-overlay");
+  const body = document.getElementById("sstaas-overlay-body");
+  body.innerHTML = html;
+  ov.removeAttribute("hidden");
+}
 function hideOverlay() {
   document.getElementById("sstaas-overlay").setAttribute("hidden", "");
 }
 
-// ---- Assets panel ----
-
-function fmtBytes(n) {
-  if (n == null) return "";
-  const x = Number(n);
-  if (x < 1024) return x + " B";
-  if (x < 1024 * 1024) return (x / 1024).toFixed(1) + " KB";
-  return (x / (1024 * 1024)).toFixed(1) + " MB";
-}
-
-async function refreshAssetsPanel(folderId) {
-  const panel = document.getElementById("sstaas-assets");
-  const list = document.getElementById("sstaas-assets-list");
-  const summary = document.getElementById("sstaas-assets-summary");
-  if (!panel || !list) return;
-
-  let meta;
-  try { meta = await drive.readMeta(folderId); }
-  catch (err) {
-    list.innerHTML = `<p class="sstaas-placeholder">Couldn't read meta: ${err.message}</p>`;
-    panel.removeAttribute("hidden");
-    return;
-  }
-
-  const entries = Object.entries(meta.assets ?? {});
-  const cacheStats = await assets.summarize();
-  if (summary) {
-    summary.textContent =
-      `${entries.length} listed · ${cacheStats.count} cached (${fmtBytes(cacheStats.totalBytes)})`;
-  }
-
-  if (entries.length === 0) {
-    list.innerHTML = `<p class="sstaas-placeholder">No assets in this folder.</p>`;
-    panel.removeAttribute("hidden");
-    return;
-  }
-
-  entries.sort((a, b) => {
-    if (a[1].status !== b[1].status) return a[1].status === "active" ? -1 : 1;
-    return (a[1].name ?? "").localeCompare(b[1].name ?? "");
-  });
-
-  list.innerHTML = "";
-  for (const [id, entry] of entries) {
-    const row = document.createElement("div");
-    row.className = "sstaas-asset-row" + (entry.status !== "active" ? " archived" : "");
-    row.title = `${entry.name} · ${entry.mimeType ?? "?"} · status=${entry.status}`
-      + (entry.cachedAt ? ` · cached ${entry.cachedAt}` : "");
-
-    const name = document.createElement("span");
-    name.className = "sstaas-asset-name";
-    name.textContent = entry.name + (entry.status !== "active" ? "  (archived)" : "");
-
-    const size = document.createElement("span");
-    size.className = "sstaas-asset-size";
-    size.textContent = fmtBytes(entry.size);
-
-    const keep = document.createElement("label");
-    keep.className = "sstaas-asset-keep";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = !!entry.keepOffline;
-    cb.disabled = entry.status !== "active";
-    cb.addEventListener("change", async () => {
-      cb.disabled = true;
-      try {
-        await setKeepOffline(folderId, meta, id, cb.checked);
-        await drive.writeMeta(folderId, meta);
-        await refreshAssetsPanel(folderId);
-      } catch (err) {
-        console.error("keep-offline toggle failed", err);
-        cb.checked = !cb.checked;
-        alert("Toggle failed: " + err.message);
-        cb.disabled = false;
-      }
-    });
-    keep.appendChild(cb);
-    keep.appendChild(document.createTextNode("offline"));
-
-    row.append(name, size, keep);
-    list.appendChild(row);
-  }
-  panel.removeAttribute("hidden");
-}

@@ -113,9 +113,21 @@ func jsParseN4L(this js.Value, args []js.Value) any {
 				return nil, err
 			}
 		}
+		var progress n4lparse.ProgressFn
+		if len(args) >= 3 && args[2].Type() == js.TypeFunction {
+			cb := args[2]
+			progress = func(stage, name string, i, total int) {
+				cb.Invoke(stage, name, i, total)
+				// Yield to JS so the status update actually paints
+				// before the next chunk of work. In WASM Go's
+				// time.Sleep is implemented as a JS setTimeout,
+				// which returns control to the event loop.
+				time.Sleep(time.Millisecond)
+			}
+		}
 
 		tParse := time.Now()
-		res, err := n4lparse.ParseWithConfigs(&psst, userConfigs, files)
+		res, err := n4lparse.ParseWithConfigs(&psst, userConfigs, files, progress)
 		parseMs := time.Since(tParse).Milliseconds()
 		if err != nil {
 			return nil, fmt.Errorf("parseN4L: %w", err)

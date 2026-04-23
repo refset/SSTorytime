@@ -47,7 +47,6 @@ echo "Patching index.html (inject bootstrap script tag)…"
 #    reach origFetch first (we hit this in practice — GET /searchN4L
 #    returned 404 from python's http.server because the shim wasn't
 #    yet installed).
-#  - the GIS loader (async, for Drive auth).
 #  - the bootstrap module, which installs the full shim and replaces
 #    the parked-Promise behavior with real handlers.
 python3 - "$PUBLIC/index.html" "$DIST/index.html" <<'PY'
@@ -82,7 +81,6 @@ inject = """    <!-- sstaas client-side-drive additions -->
         };
       })();
     </script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script type="module" defer src="/sstaas/bootstrap.js"></script>
   </head>"""
 html = html.replace("  </head>", inject, 1)

@@ -87,8 +87,65 @@ async function handleSearchN4L(body) {
   // crashes on anything except an Orbits envelope. jsSearch returns
   // an empty-Orbits response for empty queries so that path is safe.
   const name = (body.name ?? body.query ?? "").trim();
-  const raw = await wasmSearch(name);
-  return typeof raw === "string" ? JSON.parse(raw) : raw;
+  // Empty-query bootstraps shouldn't flash a spinner; only real queries do.
+  const useSpinner = !!name;
+  if (useSpinner) await showSpinner(`Searching for "${name}"…`);
+  try {
+    const raw = await wasmSearch(name);
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  } finally {
+    if (useSpinner) hideSpinner();
+  }
+}
+
+// ---- Spinner ----
+//
+// WASM search runs on the main thread and can block for seconds on
+// large graphs. Showing a fullscreen overlay doesn't make it faster,
+// but it tells the user the tab isn't dead. The double-rAF + setTimeout
+// forces a paint before we kick off the blocking call.
+
+let spinnerEl = null;
+function ensureSpinner() {
+  if (spinnerEl) return spinnerEl;
+  const style = document.createElement("style");
+  style.textContent = `
+    #sstaas-spinner {
+      position: fixed; inset: 0; background: rgba(255,255,255,0.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 2000; flex-direction: column; gap: 1rem; color: #333;
+      font-size: 0.9rem; backdrop-filter: blur(1px);
+    }
+    #sstaas-spinner[hidden] { display: none; }
+    #sstaas-spinner .sstaas-spin {
+      width: 2rem; height: 2rem; border-radius: 50%;
+      border: 3px solid #c8c8c4; border-top-color: #4a86c8;
+      animation: sstaas-spin 0.9s linear infinite;
+    }
+    @keyframes sstaas-spin { to { transform: rotate(360deg); } }
+  `;
+  document.head.appendChild(style);
+  const el = document.createElement("div");
+  el.id = "sstaas-spinner";
+  el.setAttribute("hidden", "");
+  el.innerHTML = `<div class="sstaas-spin"></div><div id="sstaas-spinner-msg"></div>`;
+  document.body.appendChild(el);
+  spinnerEl = el;
+  return el;
+}
+
+function showSpinner(message) {
+  const el = ensureSpinner();
+  el.querySelector("#sstaas-spinner-msg").textContent = message ?? "";
+  el.removeAttribute("hidden");
+  // Force a paint before the caller starts blocking work.
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  });
+}
+
+function hideSpinner() {
+  if (spinnerEl) spinnerEl.setAttribute("hidden", "");
 }
 
 async function handleSearchAssets(body) {
@@ -99,8 +156,8 @@ async function handleSearchAssets(body) {
 
 async function handleUpload(body) {
   return packageResponse("Error", JSON.stringify(
-    "Direct /Upload not supported. Drop files into your chosen Google Drive folder, " +
-    "then press Re-index."
+    "Direct /Upload not supported. Push files to your chosen GitHub repo, " +
+    "then press re-index."
   ));
 }
 

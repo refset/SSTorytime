@@ -83,13 +83,53 @@ function ensureGoRuntime() {
   });
 }
 
-export async function parseN4L(filesObj, configsObj) {
+export async function parseN4L(filesObj, configsObj, { onProgress } = {}) {
   if (!window.__sstWasm) throw new Error("WASM not initialized");
-  const out = configsObj
-    ? await window.__sstWasm.parseN4L(filesObj, configsObj)
-    : await window.__sstWasm.parseN4L(filesObj);
-  // out is a JSON string per cmd/wasm/main.go
-  return typeof out === "string" ? JSON.parse(out) : out;
+  // Two sources of progress:
+  //   1. Go-side callback from n4lparse (per-file + infer stages).
+  //   2. Stdout stage markers from GraphToDB ("Storing primary
+  //      nodes…", "Storing Arrows…", "Indexing …", "Finally done!"),
+  //      caught by wrapping console.log.
+  const restore = onProgress ? hookStdout(onProgress) : null;
+  const goProgress = onProgress
+    ? (stage, name, i, total) => {
+        if (stage === "config") onProgress(`Loading config ${i}/${total}: ${basename(name)}`);
+        else if (stage === "parse") onProgress(`Parsing ${i}/${total}: ${name}`);
+        else if (stage === "infer") onProgress("Inferring relations…");
+      }
+    : null;
+  try {
+    const args = [filesObj];
+    if (configsObj || goProgress) args.push(configsObj ?? {});
+    if (goProgress) args.push(goProgress);
+    const out = await window.__sstWasm.parseN4L(...args);
+    return typeof out === "string" ? JSON.parse(out) : out;
+  } finally {
+    restore?.();
+  }
+}
+
+function basename(p) {
+  const i = p.lastIndexOf("/");
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
+function hookStdout(onProgress) {
+  const orig = console.log;
+  const fileCount = 0;
+  console.log = function (...args) {
+    orig.apply(this, args);
+    const text = args.map((a) => (typeof a === "string" ? a : "")).join(" ").trim();
+    if (!text) return;
+    if (text.startsWith("Storing primary nodes"))     onProgress("Storing primary nodes…");
+    else if (text.startsWith("Storing Arrows"))       onProgress("Storing arrows…");
+    else if (text.startsWith("Storing inverse"))      onProgress("Storing inverse arrows…");
+    else if (text.startsWith("Storing contexts"))     onProgress("Storing contexts…");
+    else if (text.startsWith("Storing page map"))     onProgress("Storing page map…");
+    else if (text.startsWith("Indexing"))             onProgress("Indexing…");
+    else if (text.startsWith("Finally done"))         onProgress("Finalising…");
+  };
+  return () => { console.log = orig; };
 }
 
 // wasmSearch returns the upstream Response envelope verbatim — fetch-shim

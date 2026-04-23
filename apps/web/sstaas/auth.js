@@ -1,10 +1,17 @@
-// Google OAuth via the Google Identity Services token client.
-// Tokens live in memory only — refreshing the page signs the user out.
+// GitHub authentication via personal access token (PAT) paste.
+//
+// Device flow would be nicer UX but GitHub's /login/* endpoints don't
+// send CORS headers, so any browser-only SPA is stuck with either a
+// proxy (infra) or PATs (paste ceremony). PATs it is.
+//
+// Tokens persist in localStorage across reloads; revoking them at
+// github.com/settings/tokens invalidates the cached token, which we
+// drop on the next 401 from the API.
 
-import { CONFIG } from "./config.js";
+const USER_URL    = "https://api.github.com/user";
+const STORAGE_KEY = "sstaas-github-token";
 
-let tokenClient = null;
-let currentToken = null; // { access_token, expires_at }
+let currentToken = null; // string | null
 const listeners = new Set();
 
 function notify() {
@@ -14,55 +21,77 @@ function notify() {
   }
 }
 
-function waitForGis() {
-  return new Promise((resolve, reject) => {
-    if (window.google?.accounts?.oauth2) return resolve();
-    let tries = 0;
-    const t = setInterval(() => {
-      if (window.google?.accounts?.oauth2) { clearInterval(t); resolve(); }
-      else if (++tries > 200) { clearInterval(t); reject(new Error("Google Identity Services failed to load")); }
-    }, 50);
-  });
+function loadStoredToken() {
+  try { return localStorage.getItem(STORAGE_KEY); }
+  catch { return null; }
+}
+
+function storeToken(t) {
+  try {
+    if (t) localStorage.setItem(STORAGE_KEY, t);
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch { /* private mode, etc. */ }
 }
 
 export async function initAuth() {
-  await waitForGis();
-  tokenClient = window.google.accounts.oauth2.initTokenClient({
-    client_id: CONFIG.googleClientId,
-    scope: CONFIG.driveScope,
-    callback: (resp) => {
-      if (resp.error) { console.error("oauth error", resp); return; }
-      currentToken = {
-        access_token: resp.access_token,
-        expires_at: Date.now() + (resp.expires_in ?? 3600) * 1000,
-      };
-      notify();
-    },
-  });
-}
-
-export function signIn() {
-  if (!tokenClient) throw new Error("auth not initialized");
-  tokenClient.requestAccessToken({ prompt: "" });
-}
-
-export function signOut() {
-  if (currentToken?.access_token) {
-    window.google?.accounts?.oauth2?.revoke?.(currentToken.access_token, () => {});
-  }
-  currentToken = null;
+  currentToken = loadStoredToken();
   notify();
 }
 
-export function getToken() {
-  if (!currentToken) return null;
-  if (Date.now() >= currentToken.expires_at - 30_000) return null;
-  return currentToken.access_token;
+// Validate a candidate token against api.github.com/user. On success
+// we cache it and broadcast; on failure we leave the old token alone
+// and throw so the caller can surface the error.
+export async function signInWithToken(rawToken) {
+  const token = (rawToken ?? "").trim();
+  if (!token) throw new Error("token is empty");
+  const r = await fetch(USER_URL, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+  });
+  if (r.status === 401) throw new Error("token rejected by GitHub (401)");
+  if (!r.ok) throw new Error(`GitHub /user returned ${r.status}`);
+  const user = await r.json();
+  currentToken = token;
+  storeToken(token);
+  cachedUser = { token, user };
+  notify();
+  return user;
 }
 
-export function isSignedIn() { return getToken() !== null; }
+export function signOut() {
+  currentToken = null;
+  cachedUser = null;
+  storeToken(null);
+  notify();
+}
+
+export function getToken() { return currentToken; }
+export function isSignedIn() { return !!currentToken; }
 
 export function onAuthChange(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
+}
+
+// Called by api layer when a 401 comes back — the token was revoked
+// or rotated.
+export function invalidateToken() {
+  if (!currentToken) return;
+  currentToken = null;
+  cachedUser = null;
+  storeToken(null);
+  notify();
+}
+
+let cachedUser = null;
+export async function getUser() {
+  if (!currentToken) return null;
+  if (cachedUser?.token === currentToken) return cachedUser.user;
+  const r = await fetch(USER_URL, {
+    headers: { Authorization: `Bearer ${currentToken}`, Accept: "application/vnd.github+json" },
+  });
+  if (r.status === 401) { invalidateToken(); return null; }
+  if (!r.ok) throw new Error(`github user ${r.status}`);
+  const user = await r.json();
+  cachedUser = { token: currentToken, user };
+  return user;
 }
