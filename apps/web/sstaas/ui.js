@@ -18,8 +18,12 @@ import { reindex } from "./reindex.js";
 import { parseN4L } from "./bridge.js";
 import { getSessionId } from "./session.js";
 import * as fh from "./folder-handle.js";
+import * as mcp from "./mcp-bridge.js";
 
 const TARGET_KEY = "sstaas-github-target";
+const MCP_URL_KEY = "sstaas-mcp-url";
+const MCP_ENABLED_KEY = "sstaas-mcp-enabled";
+const DEFAULT_MCP_URL = "ws://localhost:8889/ws";
 const POLL_MS = 30_000;
 
 // ---- Markup injection ----
@@ -57,6 +61,16 @@ const CONTROLS_HTML = `
       <code id="sstaas-local-name" class="sstaas-folder"></code>
       <button id="sstaas-local-refresh" class="sstaas-icon-btn" title="Refresh: rescan folder + re-parse">⟳</button>
     </span>
+
+    <!-- Local MCP hub toggle. When enabled, the SPA opens a WebSocket
+         to a locally-running MCP-SST server so Claude Code can drive
+         this tab's search. Opt-in; nothing connects until ticked. -->
+    <label class="sstaas-mcp-row" title="Bridge this tab to a local MCP-SST server so Claude Code can call searches here.">
+      <input id="sstaas-mcp-toggle" type="checkbox">
+      <span>Connect local MCP</span>
+      <input id="sstaas-mcp-url" class="sstaas-input" placeholder="ws://localhost:8889/ws" size="22" value="${DEFAULT_MCP_URL}">
+      <span id="sstaas-mcp-dot" class="sstaas-dot" title="Not connected"></span>
+    </label>
 
     <span id="sstaas-status" class="sstaas-status"></span>
   </div>`;
@@ -106,6 +120,11 @@ const STYLE = `
 
   .sstaas-local-row {
     display: inline-flex; align-items: center; gap: 0.35rem;
+  }
+  .sstaas-mcp-row {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-size: 0.82rem; color: #555; padding: 0.1rem 0.4rem;
+    border: 1px dashed #c8c8c4; border-radius: 4px;
   }
   .sstaas-dot {
     width: 0.65rem; height: 0.65rem; border-radius: 50%;
@@ -210,6 +229,31 @@ export async function injectUI({ isBridgeReady } = {}) {
   });
   document.getElementById("sstaas-local-refresh").addEventListener("click", onLocalRefresh);
 
+  // MCP bridge toggle.
+  const mcpToggle = document.getElementById("sstaas-mcp-toggle");
+  const mcpUrl = document.getElementById("sstaas-mcp-url");
+  mcpUrl.value = localStorage.getItem(MCP_URL_KEY) || DEFAULT_MCP_URL;
+  mcpToggle.checked = localStorage.getItem(MCP_ENABLED_KEY) === "1";
+  mcpToggle.addEventListener("change", () => {
+    localStorage.setItem(MCP_ENABLED_KEY, mcpToggle.checked ? "1" : "0");
+    applyMcpToggle();
+  });
+  mcpUrl.addEventListener("change", () => {
+    const v = mcpUrl.value.trim();
+    localStorage.setItem(MCP_URL_KEY, v);
+    if (mcpToggle.checked) applyMcpToggle();
+  });
+  mcp.onStatusChange(({ status }) => {
+    const dot = document.getElementById("sstaas-mcp-dot");
+    if (!dot) return;
+    dot.classList.remove("green", "yellow", "red");
+    if (status === "connected") { dot.classList.add("green"); dot.title = "Connected: " + mcpUrl.value; }
+    else if (status === "connecting") { dot.classList.add("yellow"); dot.title = "Connecting…"; }
+    else if (status === "error") { dot.classList.add("red"); dot.title = "Connection error"; }
+    else dot.title = "Not connected";
+  });
+  applyMcpToggle();
+
   onAuthChange(refresh);
   refresh();
 
@@ -222,6 +266,16 @@ export async function injectUI({ isBridgeReady } = {}) {
 function loadTarget() {
   try { return JSON.parse(localStorage.getItem(TARGET_KEY) ?? "null"); }
   catch { return null; }
+}
+
+function applyMcpToggle() {
+  const enabled = localStorage.getItem(MCP_ENABLED_KEY) === "1";
+  const url = (localStorage.getItem(MCP_URL_KEY) || DEFAULT_MCP_URL).trim();
+  if (enabled && url) {
+    mcp.connect(url, { target: loadTarget() });
+  } else {
+    mcp.disconnect();
+  }
 }
 
 function onSignIn() {
@@ -277,6 +331,7 @@ async function onLoadTarget() {
   if (!owner || !repo) { setStatus("Owner and repo are required."); return; }
   const target = { owner, repo, branch, path };
   localStorage.setItem(TARGET_KEY, JSON.stringify(target));
+  mcp.updateTarget(target);
   refresh();
   setDot("yellow", "Target loaded — press ⟳ to index", "sstaas-gh-dot");
   await runReindex();
