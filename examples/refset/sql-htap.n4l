@@ -1,10 +1,10 @@
 
-- SQL HTAP (hybrid transactional/analytical processing)
+- SQL HTAP hybrid transactional analytical processing
 
 :: definitions, origins ::
 
 HTAP (means) Hybrid Transactional/Analytical Processing
-HTAP (coined by) Gartner, circa 2014
+HTAP (coined by) Gartner around 2014
 HTAP (goal) run OLTP + OLAP on the same data without ETL to a warehouse
 OLTP (means) many small reads/writes, low latency, row-oriented workloads
 OLAP (means) large scans, aggregations, column-oriented workloads
@@ -29,7 +29,7 @@ SingleStore (aka) MemSQL
     "       (feature) universal storage, skiplist + columnstore unified
 SAP HANA (feature) in-memory column store handling both workloads
 Oracle (feature) Database In-Memory dual-format
-Snowflake Unistore (announced) 2022, hybrid tables for OLTP alongside warehouse
+Snowflake Unistore (announced) in 2022, hybrid tables for OLTP alongside warehouse
 Google AlloyDB (feature) Postgres-compatible with columnar engine for analytics
 CockroachDB (note) primarily OLTP; analytical story evolving
 YugabyteDB (note) distributed SQL; analytics via external engines
@@ -37,11 +37,11 @@ XTDB 2 (feature) Arrow-native columnar with transactional bitemporal semantics
 
 :: trends ::
 
-trend (item) open table formats (Iceberg, Delta, Hudi) as the integration point
+trend (item) open table formats like Iceberg, Delta, Hudi as the integration point
 trend (item) Arrow + DataFusion as common columnar substrate
 trend (item) serverless autoscaling decoupled from storage
 trend (item) vectorised execution becoming table stakes
-trend (item) CDC (Debezium, Fivetran) as HTAP substitute when true HTAP is too costly
+trend (item) CDC via Debezium/Fivetran as HTAP substitute when true HTAP is too costly
 trend (item) MVCC-on-columnar as a hard research problem
 trend (item) rise of "small data" pushback — DuckDB showing OLAP fits on a laptop
 
@@ -55,9 +55,9 @@ cost (item) consistency model across row+columnar replicas is subtle
 
 :: research & references ::
 
-Özcan, Tian, Tözün (paper) "Hybrid Transactional/Analytical Processing: A Survey" SIGMOD 2017
+Özcan, Tian, Tözün (paper) Hybrid Transactional/Analytical Processing - A Survey, SIGMOD 2017
 Kemper, Neumann (paper) HyPer — main-memory HTAP prototype, TU München
-HyPer (acquired by) Tableau, 2016
+HyPer (acquired by) Tableau in 2016
 MonetDB/X100 (role) seminal vectorised columnar engine
 C-Store → Vertica (role) seminal pure-OLAP columnar lineage
 Umbra (note) Neumann follow-up to HyPer, compiled queries

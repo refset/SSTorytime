@@ -147,3 +147,12 @@
 
 
 
+
+ :: knowledge graph / software / industry history ::
+
+   + led to              (led to)       - is an outcome leading back to     (led-to-by)
+   + adds                (adds)         - was added by                      (added-by)
+   + combines            (combines)     - is combined by                    (combined-by)
+   + term coined by      (coined by)    - coined the term                   (coined)
+   + was acquired by     (acquired by)  - acquired                          (acquired)
+   + was announced in    (announced)    - is an announcement date for       (announcement-for)

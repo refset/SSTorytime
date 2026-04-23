@@ -20,10 +20,10 @@ immutability (enables) audit trails, reproducibility, time-travel debugging
 
 :: foundational work, research ::
 
-Richard Snodgrass (role) authored "Developing Time-Oriented Database Applications in SQL" (1999)
+Richard Snodgrass (role) authored "Developing Time-Oriented Database Applications in SQL", 1999
     "         (role) long-time proponent of temporal SQL standards
 Jim Gray, Surajit Chaudhuri (note) early MSR work on temporal extensions
-TSQL2 (means) 1990s proposal to extend SQL with temporal primitives
+TSQL2 (means) a 1990s proposal to extend SQL with temporal primitives
 TSQL2 (led to) SQL:2011 temporal features
 SQL:2011 (adds) system-versioned tables, application-time period tables
 SQL:2011 (limitation) leaves bitemporal semantics partly to vendors
@@ -41,10 +41,10 @@ XTDB 2 (note) rewritten on Apache Arrow columnar storage
   "   (feature) HTAP-style architecture, separation of storage and compute
 
 MarkLogic (feature) bitemporal document support since 8.0
-Snowflake (feature) time travel via system time only (unitemporal)
+Snowflake (feature) unitemporal time travel via system time only
 Datomic (note) asserts/retracts with transaction time; not strictly bitemporal
   "     (contrast) XTDB which adds valid-time
-MariaDB, DB2, SQL Server (feature) system-versioned temporal tables (SQL:2011 subset)
+MariaDB, DB2, SQL Server (feature) system-versioned temporal tables as a SQL:2011 subset
 Postgres (note) no native bitemporal support; extensions like temporal_tables exist
 
 :: use cases, regulatory drivers ::
@@ -58,12 +58,12 @@ decision audit (driver) "why did the system do X at time T given what it knew"
 :: trends, tensions ::
 
 trend (item) convergence of event sourcing + bitemporality
-trend (item) immutable ledgers (crypto-influenced) meeting temporal SQL
-trend (item) push toward open table formats (Iceberg, Delta) with time travel
+trend (item) immutable crypto-influenced ledgers meeting temporal SQL
+trend (item) push toward open table formats Iceberg/Delta with time travel
 tension (item) time travel ≠ bitemporal — most lakehouses only track system time
 tension (item) GDPR erasure vs. immutable audit requirements
 research (item) temporal joins, Allen's interval algebra in SQL optimisers
-research (item) indexing strategies for bitemporal range queries (e.g. MVBT, BT-tree)
+research (item) indexing strategies for bitemporal range queries such as MVBT, BT-tree
 
 :: see also ::
 

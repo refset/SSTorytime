@@ -269,3 +269,23 @@
  + indecipherable role (???)  - undecipherable role (xxx)
  
 
+
+ :: knowledge graph / software / research attributes ::
+
+   + also known as        (aka)          - is another name for             (aka-of)
+   + lists feature        (feature)      - is a listed feature of          (feature-of)
+   + is driven by         (driver)       - drives                          (drives)
+   + has limitation       (limitation)   - is a limitation of              (limit-of)
+   + is written in language (lang)       - is a language for               (lang-for)
+   + has goal             (goal)         - is a goal of                    (goal-of)
+   + has item             (item)         - is an item in                   (item-of)
+   + has trend            (trend)        - is a trend in                   (trend-of)
+   + cites example        (example)      - is cited as an example of       (example-of)
+   + is related to        (related)      - has relation from               (related-of)
+   + requires             (requires)     - is required by                  (required-by)
+   + has mitigation       (mitigation)   - mitigates                       (mitigates)
+   + follows practice     (practice)     - is a practice of                (practice-of)
+   + uses pattern         (pattern)      - is a pattern used in            (pattern-for)
+   + referenced paper     (paper)        - is a paper cited by             (paper-for)
+   + known for work       (work)         - is work by                      (work-by)
+   + introduced concept   (concept)      - is a concept by                 (concept-by)

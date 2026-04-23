@@ -18,8 +18,8 @@ bitemporality (enables) distinguishing "what we knew then" from "what was true t
 :: regulatory drivers ::
 
 GDPR Art. 22 (requires) right to meaningful information about automated decisions
-EU AI Act (2024) (requires) logging, traceability for high-risk AI systems
-SR 11-7 (US Fed) (requires) model risk management, documented decision trails
+EU AI Act 2024 (requires) logging, traceability for high-risk AI systems
+SR 11-7 from US Fed (requires) model risk management, documented decision trails
 BCBS 239 (requires) risk data aggregation with full lineage
 MiFID II (requires) reconstruction of trading decisions to the millisecond
 SOX (requires) audit trails over financial reporting systems
@@ -30,12 +30,12 @@ HIPAA (requires) access and modification audit trails for PHI
 
 event sourcing (role) append-only event log as source of truth
      "         (enables) replay to reconstruct any past state
-CQRS (related) separates write model (events) from read models (projections)
+CQRS (related) separates write-model events from read-model projections
 bitemporal DB (role) system+valid time natively support as-of replay
 immutable ledgers (example) XTDB, Datomic, Kafka-as-database patterns
 feature stores (role) store model inputs at inference time for later audit
 model registries (role) MLflow, SageMaker, W&B — version model artifacts
-decision logs (pattern) record (inputs, model_version, output, timestamp) per call
+decision logs (pattern) record inputs, model_version, output, timestamp per call
 
 :: ML/AI-specific concerns ::
 
@@ -48,11 +48,11 @@ shadow deployment (practice) log proposed decisions without acting on them
 
 :: industry & research trends ::
 
-trend (item) "decision intelligence" platforms (Palantir, Quantexa, Decision Systems Intl)
+trend (item) decision intelligence platforms like Palantir, Quantexa, Decision Systems Intl
 trend (item) OpenLineage standard for data lineage across tools
 trend (item) OpenTelemetry extending into semantic conventions for AI/LLM spans
 trend (item) policy-as-code: OPA, Cedar — auditable decision engines
-trend (item) rules engines re-emerging (Drools, Clara) for auditable logic
+trend (item) rules engines re-emerging — Drools, Clara — for auditable logic
 trend (item) "glass-box" ML: interpretable models preferred in regulated sectors
 trend (item) differential privacy vs. auditability tension
 research (item) causal inference frameworks for counterfactual audits
@@ -64,7 +64,7 @@ tension (item) GDPR erasure vs. immutable audit logs
 tension (item) log volume vs. retention cost
 tension (item) privacy of inputs vs. need for replay
 tension (item) system-time-only time travel misses retroactive corrections
-tension (item) vendor black boxes (foundation models) limit full auditability
+tension (item) vendor black-box foundation models limit full auditability
 tension (item) "audit theatre" — logging without anyone able to replay
 
 :: key voices ::
