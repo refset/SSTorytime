@@ -5,7 +5,7 @@
 // Endpoints intercepted:
 //   POST /searchN4L     → local search against PGlite
 //   POST /SearchAssets  → local asset search
-//   POST /Upload        → upload to user's Drive folder
+//   POST /Upload        → upload to the connected GitHub repo path
 //
 // All other URLs pass through to the real fetch.
 

@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS sstaas_meta (
 -- Each parsed N4L file lives as a row so we can show what's been
 -- ingested and re-parse just the changed ones.
 CREATE TABLE IF NOT EXISTS n4l_files (
-  drive_file_id   TEXT PRIMARY KEY,
+  repo_file_id   TEXT PRIMARY KEY,
   name            TEXT NOT NULL,
   text            TEXT NOT NULL,
   sha256          TEXT,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS n4l_files (
 -- these via the WASM parseN4L diff once it's ported.
 CREATE TABLE IF NOT EXISTS nodes (
   id              BIGSERIAL PRIMARY KEY,
-  drive_file_id   TEXT REFERENCES n4l_files(drive_file_id) ON DELETE CASCADE,
+  repo_file_id   TEXT REFERENCES n4l_files(repo_file_id) ON DELETE CASCADE,
   s               TEXT NOT NULL,
   chap            TEXT,
   s_lower         TEXT GENERATED ALWAYS AS (lower(s)) STORED
@@ -44,7 +44,7 @@ CREATE INDEX IF NOT EXISTS nodes_chap_idx    ON nodes (chap);
 
 CREATE TABLE IF NOT EXISTS arrows (
   id              BIGSERIAL PRIMARY KEY,
-  drive_file_id   TEXT REFERENCES n4l_files(drive_file_id) ON DELETE CASCADE,
+  repo_file_id   TEXT REFERENCES n4l_files(repo_file_id) ON DELETE CASCADE,
   short           TEXT NOT NULL,
   long            TEXT,
   st_type         INTEGER
@@ -53,7 +53,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS arrows_short_idx ON arrows (short);
 
 CREATE TABLE IF NOT EXISTS links (
   id              BIGSERIAL PRIMARY KEY,
-  drive_file_id   TEXT REFERENCES n4l_files(drive_file_id) ON DELETE CASCADE,
+  repo_file_id   TEXT REFERENCES n4l_files(repo_file_id) ON DELETE CASCADE,
   src_node_id     BIGINT REFERENCES nodes(id) ON DELETE CASCADE,
   dst_node_id     BIGINT REFERENCES nodes(id) ON DELETE CASCADE,
   arrow_id        BIGINT REFERENCES arrows(id) ON DELETE CASCADE,
@@ -75,8 +75,8 @@ export async function initDB() {
     // future PGlite release fixes it or once we wire OPFS persistence
     // (which needs cross-origin isolation headers we don't have on
     // GitHub Pages anyway). For now we run in-memory: the parsed
-    // graph is rebuildable on demand via Re-index, since Google Drive
-    // holds the source of truth.
+    // graph is rebuildable on demand via Re-index, since the GitHub
+    // repository holds the source of truth.
     const { PGlite } = await import(
       "https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.4.4/dist/index.js"
     );

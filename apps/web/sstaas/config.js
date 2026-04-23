@@ -6,8 +6,8 @@ export const CONFIG = {
   n4lExtensions: [".n4l"],
 
   // Versions surfaced in the footer; bump when legal/*.html changes.
-  termsVersion: "2026-04-22",
-  privacyVersion: "2026-04-22",
+  termsVersion: "2026-04-23",
+  privacyVersion: "2026-04-23",
 };
 
 // Only attempt the local override on dev origins — saves a noisy

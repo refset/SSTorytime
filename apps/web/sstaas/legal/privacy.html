@@ -1,5 +1,5 @@
 <h1>Privacy</h1>
-<p><em>Version 2026-04-22</em></p>
+<p><em>Version 2026-04-23</em></p>
 
 <h2>Summary</h2>
 <p>
@@ -16,28 +16,30 @@
   <li><strong>By the static host:</strong> standard web request metadata
       (IP, user agent, requested path) per the host's policy. The
       maintainers don't access those logs.</li>
-  <li><strong>By Google:</strong> when you sign in and grant Drive
-      access, Google records that activity per their own privacy policy.
-      The OAuth scope used is
-      <code>https://www.googleapis.com/auth/drive.file</code>, which
-      restricts the app to files you explicitly open or create through it.</li>
+  <li><strong>By GitHub:</strong> when you use a personal access token
+      (PAT) to load or save files, GitHub records that API activity per
+      their own privacy policy. The app only talks to the repositories
+      whose contents your PAT allows it to reach.</li>
 </ul>
 
 <h2>Where your data lives</h2>
 <ul>
-  <li><strong>Source N4L and asset files:</strong> in your Google Drive
-      folder.</li>
+  <li><strong>Source N4L and asset files:</strong> in the GitHub
+      repository you connect.</li>
   <li><strong>Parsed graph:</strong> in your browser, in IndexedDB via
       PGlite. It's derived data — clearing browser storage is safe;
       press <em>Re-index</em> to rebuild.</li>
-  <li><strong>OAuth access token:</strong> in memory only, cleared on refresh.</li>
+  <li><strong>GitHub personal access token:</strong> in <code>localStorage</code>
+      on your device so it survives reloads. Clearing browser storage
+      or signing out removes it. Treat it like any other credential
+      and revoke it from GitHub if your device is compromised.</li>
 </ul>
 
 <h2>What the application can see</h2>
 <p>
-  Only files within the Drive folder you pick, and only while you're
-  signed in. The app cannot see files in other folders. Revoke access
-  at any time from your
-  <a href="https://myaccount.google.com/permissions" rel="noopener">Google
-  account permissions page</a>.
+  Only the GitHub repositories and paths your PAT grants access to,
+  and only while that token is present in your browser. You can revoke
+  the token at any time from your
+  <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">GitHub
+  personal access tokens page</a>.
 </p>

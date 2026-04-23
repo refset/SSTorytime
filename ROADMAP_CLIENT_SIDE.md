@@ -68,7 +68,7 @@ The deployed SPA lives at https://refset.github.io/SSTorytime/.
   (bootstrap script tag + queueing pre-shim), plus a regex to strip
   leading slashes from upstream asset paths so the SPA works under
   the `/SSTorytime/` Pages subpath.
-- **No Drive, no OAuth app, no verification.** The user pastes a
+- **PAT-only, no OAuth app, no verification.** The user pastes a
   GitHub personal access token scoped to the repo they want indexed.
   Token lives only in their browser's localStorage. No backend, no
   client secret, no consent-screen verification process.
