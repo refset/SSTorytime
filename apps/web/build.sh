@@ -29,6 +29,9 @@ cp "$PUBLIC"/favicon*.* "$DIST/" 2>/dev/null || true
 cp "$PUBLIC"/apple-touch-icon.png "$DIST/" 2>/dev/null || true
 cp "$PUBLIC"/android-chrome*.png "$DIST/" 2>/dev/null || true
 cp "$PUBLIC/main.js" "$DIST/main.js"
+# Strip leading slash from theme CSS paths so they resolve against
+# the document base URL (needed for subpath deploys like GH Pages).
+sed -i "s|setAttribute('href', '/\\([a-z]*\\.css\\)')|setAttribute('href', '\\1')|g" "$DIST/main.js"
 
 echo "Copying apps/web/sstaas/ → dist/sstaas/…"
 cp -r "$SSTAAS"/* "$DIST/sstaas/"
