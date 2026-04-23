@@ -511,23 +511,23 @@ func buildTOCResponse(params SST.SearchParameters, limit int) any {
 }
 
 // packageResponse builds the Response envelope upstream's UI expects.
-// Intent + Ambient are left empty — the WASM build doesn't track STM
-// context the way the long-lived Go server does.
+// Intent is left empty — it comes from UpdateSTMContext which mutates
+// persistent short-term-memory state we don't want the WASM build
+// writing. Time + Ambient come from GetTimeContext, a pure function
+// of the clock, so main.js can paint the nowbar + ambient-context
+// greeting bits exactly as the native server does.
 //
 // Content is a JSON-encoded value that must appear *inline* in the
 // envelope (Content[0] works in main.js), not as a JSON-encoded
 // string. Use json.RawMessage so Marshal doesn't double-encode it.
 func packageResponse(kind string, contentJSON string) any {
-	// Intent + Ambient are strings on upstream (GetTimeContext /
-	// UpdateSTMContext return string) — main.js does
-	// `el.textContent = obj.Ambient`, so objects render as
-	// "[object Object]". Keep them as empty strings.
+	ambient, key, _ := SST.GetTimeContext()
 	env := map[string]any{
 		"Response": kind,
 		"Content":  json.RawMessage(contentJSON),
-		"Time":     "",
+		"Time":     key,
 		"Intent":   "",
-		"Ambient":  "",
+		"Ambient":  ambient,
 	}
 	b, _ := json.Marshal(env)
 	return js.ValueOf(string(b))
